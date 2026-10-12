@@ -1,0 +1,328 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/forms";
+
+/* ═══════════════════════════════════════════════════════════════
+   品牌字体（Anthropic 品牌风格）
+   标题：Poppins + 思源黑体 Noto Sans SC（几何无衬线）
+   正文：Lora + 思源宋体 Noto Serif SC（编辑感衬线）
+   Poppins/Lora 仅覆盖拉丁字符与数字，中文由思源字体接管，
+   两级都缺失时回退系统字体（PingFang SC / 微软雅黑）
+   字体文件位于项目根目录 fonts/，构建时由 Vite 打包为带哈希的静态资源
+   ═══════════════════════════════════════════════════════════════ */
+@font-face {
+  font-family: "Poppins";
+  src: url("../fonts/Poppins-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Poppins";
+  src: url("../fonts/Poppins-Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Poppins";
+  src: url("../fonts/Poppins-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Poppins";
+  src: url("../fonts/Poppins-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Lora";
+  src: url("../fonts/Lora-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Lora";
+  src: url("../fonts/Lora-Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Lora";
+  src: url("../fonts/Lora-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Lora";
+  src: url("../fonts/Lora-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Lora";
+  src: url("../fonts/Lora-Italic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+/*
+ * 思源黑体/宋体为可变字体：单文件覆盖 100-900 全字重（含 font-black 使用的 900），
+ * 无需像 Poppins/Lora 那样按字重拆分文件。
+ * Google Fonts 下载的 NotoSansSC[wght].ttf / NotoSerifSC[wght].ttf
+ * 需重命名（方括号在 URL 中需转义）为下方文件名后放入 fonts/。
+ * 文件缺失时中文自动回退系统字体，不影响页面可用性。
+ */
+@font-face {
+  font-family: "Noto Sans SC";
+  src: url("../fonts/NotoSansSC-Variable.ttf") format("truetype");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Noto Serif SC";
+  src: url("../fonts/NotoSerifSC-Variable.ttf") format("truetype");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/*
+ * 品牌字体 token（Tailwind 主题变量）
+ * - --font-heading 标题：Poppins + 思源黑体（几何无衬线）
+ * - --font-body 全站默认：Poppins + 思源黑体（UI 无衬线，与 Claude 风格一致——界面文字一律无衬线）
+ * - --font-prose 长文阅读：Lora + 思源宋体（仅 Markdown 正文、Wiki 条目等阅读场景）
+ * - static：变量始终输出，下方 h1-h6 / body 选择器按 var() 引用时不被按需裁剪
+ * - 回退顺序：拉丁字符由 Poppins/Lora 渲染，汉字由紧随其后的思源字体渲染，
+ *   思源字体未安装时逐级回退到系统中文字体，任意层级缺字都不会出现豆腐块
+ */
+@theme static {
+  --font-heading: "Poppins", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+  --font-body: "Poppins", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+  --font-prose: "Lora", "Noto Serif SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", serif;
+  --font-sans: var(--font-body);
+}
+
+:root {
+  --bg-main: #f4f4f7;
+  --bg-elevated: rgba(255, 255, 255, 0.72);
+  --text-main: #0a0a0a;
+  --border-soft: rgba(255, 255, 255, 0.5);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 14px;
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+
+/* 语义化标题统一使用品牌标题字体（拉丁=Poppins，中文=思源黑体）；
+   置于 base 层而非顶层，组件仍可用 font-mono / font-heading 等工具类覆盖 */
+@layer base {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-heading);
+  }
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+/* Tailwind v4 起 button 等交互元素默认 cursor: default（与浏览器一致），
+   全站恢复手型指针以标示可点击；禁用态保持 not-allowed 由工具类控制。
+   置于 base 层，组件仍可用 cursor-* 工具类覆盖。 */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled),
+  select:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled),
+  label:has(> input[type="checkbox"]:not(:disabled)),
+  label:has(> input[type="radio"]:not(:disabled)) {
+    cursor: pointer;
+  }
+}
+
+/* 链接颜色继承由 Tailwind preflight 在 @layer base 中提供（a { color: inherit }）。
+   勿在分层外重复声明：未分层规则的优先级高于所有 @layer 工具类，
+   会导致 <a> 上的 text-white / text-neutral-400 等颜色工具类全部失效（曾致黑底按钮文字不可见）。 */
+
+.ambient-bg {
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 1) 0%, transparent 50%),
+    radial-gradient(circle at 80% 80%, rgba(0, 0, 0, 0.05) 0%, transparent 50%),
+    radial-gradient(circle at 50% 10%, rgba(0, 0, 0, 0.02) 0%, transparent 40%);
+  z-index: -1;
+  animation: fluid-rotate 20s ease-in-out infinite alternate;
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.28);
+  backdrop-filter: blur(40px) saturate(160%);
+  -webkit-backdrop-filter: blur(40px) saturate(160%);
+  border: 1px solid var(--border-soft);
+  box-shadow:
+    0 4px 20px 0 rgba(0, 0, 0, 0.02),
+    0 30px 80px -20px rgba(0, 0, 0, 0.08);
+  transition: all 0.35s ease;
+}
+
+.tilt-card {
+  transform-style: preserve-3d;
+}
+
+.tilt-card:hover {
+  transform: translateZ(24px) rotateX(1deg) rotateY(1deg);
+  box-shadow:
+    0 32px 72px -28px rgba(0, 0, 0, 0.14),
+    0 0 0 1px rgba(255, 255, 255, 0.7);
+}
+
+.tilt-content {
+  transform: translateZ(16px);
+}
+
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(115, 115, 115, 0.38) transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(115, 115, 115, 0.28);
+  border-radius: 999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(82, 82, 82, 0.48);
+}
+
+.scrollbar-hide {
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.search-highlight em,
+[dangerouslysetinnerhtml] em,
+.bg-neutral-50\/50 em {
+  background: linear-gradient(120deg, #fef08a 0%, #fde047 100%);
+  padding: 0.1em 0.3em;
+  border-radius: 4px;
+  font-style: normal;
+  font-weight: 600;
+  color: #000;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.markdown-body {
+  word-break: break-word;
+}
+
+.markdown-body pre {
+  margin: 0;
+}
+
+@keyframes fluid-rotate {
+  from {
+    filter: hue-rotate(0deg) contrast(1.08);
+  }
+
+  to {
+    filter: hue-rotate(15deg) contrast(1.15);
+  }
+}
+
+@keyframes floating {
+  0%,
+  100% {
+    transform: translateY(0) translateZ(24px);
+  }
+
+  50% {
+    transform: translateY(-8px) translateZ(24px);
+  }
+}
+
+.animate-float {
+  animation: floating 4s ease-in-out infinite;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   知识库 chunk 富文本（ChunkContent）：引擎表格块（MinerU table_html）
+   消毒渲染后的表格样式；文本节点换行经容器 whitespace-pre-wrap 保留
+   ═══════════════════════════════════════════════════════════════ */
+.chunk-rich table {
+  border-collapse: collapse;
+  margin: 6px 0;
+  max-width: 100%;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.chunk-rich th,
+.chunk-rich td {
+  border: 1px solid #d4d4d4;
+  padding: 3px 8px;
+  text-align: left;
+  vertical-align: top;
+  white-space: normal;
+}
+
+.chunk-rich th {
+  background: #f5f5f5;
+  font-weight: 600;
+}
+
+.chunk-rich tr:nth-child(even) td {
+  background: #fafafa;
+}

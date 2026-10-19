@@ -54,6 +54,9 @@ const ChatPage: React.FC = () => {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [input, setInput] = useState('');
   const [scope, setScope] = useState<string[]>([]);
+  /** 会话模型偏好（选择器解析回调填充，随请求携带——新会话首轮无偏好可读） */
+  const [llmProvider, setLlmProvider] = useState<string | null>(null);
+  const [llmModel, setLlmModel] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -192,6 +195,8 @@ const ChatPage: React.FC = () => {
       message: text,
       knowledgeAppIds: scope.length > 0 ? scope : undefined,
       topK: CHAT_DEFAULT_TOP_K,
+      llmProvider: llmProvider ?? undefined,
+      llmModel: llmModel ?? undefined,
     }, streamCallbacks(idx));
   };
 
@@ -315,6 +320,7 @@ const ChatPage: React.FC = () => {
               servicePrefix="cy-knowledge-repository"
               sessionId={activeId}
               disabled={sending}
+              onPreferenceResolved={(p, m) => { setLlmProvider(p); setLlmModel(m); }}
             />
             <span className="text-[10px] font-semibold text-neutral-300">缺省 = 全部可见库</span>
           </span>

@@ -19,6 +19,12 @@ export interface AiProviderItem {
   chatModel?: string | null;
   /** chat 模型是否具备视觉（图片输入）能力（前端据此开放 / 隐藏图片输入入口） */
   chatVision?: boolean;
+  /** chat 模型是否支持思考控制（provider 已声明思考控制协议；前端据此显示思考开关） */
+  chatThinking?: boolean;
+  /** 思考控制是否支持强度档位（true = 低/中/高档位；false = 仅开/关二元控制） */
+  chatThinkingEffort?: boolean;
+  /** 强制思考模型子集（如 GLM-5.3 系列；选中这些模型时「关闭思考」档禁用） */
+  chatForcedModels?: string[];
   /** 可用对话模型清单（选择器按 provider 分组用；空 = 仅默认模型） */
   chatModels?: string[];
   embeddingModel?: string | null;
@@ -58,10 +64,12 @@ export const aiCatalogService = {
 
 // ─── 会话级模型偏好（按承载服务前缀路由） ─────────────────────
 
-/** 会话模型偏好（ConversationSession 的 llmProvider/llmModel 字段）。 */
+/** 会话模型偏好（ConversationSession 的 llmProvider/llmModel/thinkingPref 字段）。 */
 export interface SessionModelPreference {
   llmProvider?: string | null;
   llmModel?: string | null;
+  /** 思考偏好（off/on/low/medium/high；null = 跟随 provider 全局配置） */
+  thinkingPref?: string | null;
 }
 
 export const conversationModelApi = {
@@ -69,13 +77,20 @@ export const conversationModelApi = {
   getPreference: async (servicePrefix: string, sessionId: string): Promise<SessionModelPreference> => {
     const res = await get(`/${servicePrefix}/conversation/session/get`, { params: { id: sessionId } });
     const session = unwrap<any>(res) ?? {};
-    return { llmProvider: session.llmProvider ?? null, llmModel: session.llmModel ?? null };
+    return {
+      llmProvider: session.llmProvider ?? null,
+      llmModel: session.llmModel ?? null,
+      thinkingPref: session.thinkingPref ?? null,
+    };
   },
 
   /** 更新会话模型偏好（null = 清除覆盖、跟随平台默认）。 */
-  updatePreference: (servicePrefix: string, sessionId: string, provider: string | null, model: string | null) =>
+  updatePreference: (servicePrefix: string, sessionId: string, provider: string | null,
+                     model: string | null, thinkingPref?: string | null) =>
+    // 会话 ID 必须按字符串提交：雪花 ID 超出 JS Number 安全整数范围，
+    // Number() 转换会丢精度导致后端查无此会话（ Jackson 会把数字字符串精确反序列化为 Long）
     post(`/${servicePrefix}/conversation/session/model`, {
-      id: Number(sessionId), llmProvider: provider, llmModel: model,
+      id: sessionId, llmProvider: provider, llmModel: model, thinkingPref: thinkingPref ?? null,
     }).then(res => unwrap<boolean>(res)),
 };
 
@@ -92,6 +107,8 @@ export interface LlmProviderVO {
   chatEnabled?: boolean;
   chatModel?: string | null;
   visionEnabled?: boolean;
+  /** 思考控制模式（STANDARD_REASONING_EFFORT / GLM_THINKING_TYPE / QWEN_ENABLE_THINKING；null = 未配置） */
+  thinkingControlMode?: string | null;
   chatModels?: string[];
   embeddingEnabled?: boolean;
   embeddingModel?: string | null;
@@ -116,6 +133,8 @@ export interface LlmProviderSaveRequest {
   chatEnabled?: boolean;
   chatModel?: string | null;
   visionEnabled?: boolean;
+  /** 思考控制模式（null/省略 = 不变更；'' = 清除；值为 ThinkingControlMode 枚举名） */
+  thinkingControlMode?: string | null;
   chatModels?: string[];
   embeddingEnabled?: boolean;
   embeddingModel?: string | null;

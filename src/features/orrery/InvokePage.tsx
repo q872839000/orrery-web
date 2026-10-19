@@ -51,6 +51,32 @@ interface ReasoningBlock {
   text: string;
 }
 
+/** 流式正文块（按推理轮相位区分：commentary=过程叙述 / final=正式答复） */
+interface TextBlock {
+  step: number;
+  phase: 'commentary' | 'final';
+  text: string;
+}
+
+/** 运行过程快照（v1，随助手消息落库；历史回看据此重建执行过程视图） */
+interface ProcessSnapshot {
+  v?: number;
+  events?: TimelineItem[];
+  reasonings?: ReasoningBlock[];
+  textBlocks?: TextBlock[];
+  artifacts?: TaskArtifact[];
+  meta?: { model?: string; totalTokens?: number; durationMs?: number };
+}
+
+/** 解析过程快照 JSON（脏数据兜底为空）。 */
+const parseBlocks = (raw?: string | null): ProcessSnapshot | undefined => {
+  if (!raw) return undefined;
+  try {
+    const obj = JSON.parse(raw);
+    return obj && typeof obj === 'object' ? obj as ProcessSnapshot : undefined;
+  } catch { return undefined; }
+};
+
 interface ApprovalState {
   approvalId: string;
   summary: string;
@@ -66,6 +92,8 @@ interface LiveAssistant {
   events: TimelineItem[];
   reasonings: ReasoningBlock[];
   content: string;
+  /** 正文分块（相位分流：commentary 进过程叙述，final 作正式答复；content 为全量拼接的兜底） */
+  textBlocks?: TextBlock[];
   artifacts: TaskArtifact[];
   approval?: ApprovalState;
   clarification?: { question: string; suggestions: string[] };
@@ -82,7 +110,7 @@ interface LiveAssistant {
 
 type Msg =
   | { id: string; role: 'user'; content: string; /** 图片附件（data URI / URL，多模态输入） */ images?: string[] }
-  | { id: string; role: 'assistant'; source: 'history'; content: string; reasoning?: string; model?: string; tokens?: number; createTime?: number; plan?: PlanStep[]; artifacts?: TaskArtifact[] }
+  | { id: string; role: 'assistant'; source: 'history'; content: string; reasoning?: string; model?: string; tokens?: number; createTime?: number; plan?: PlanStep[]; artifacts?: TaskArtifact[]; blocks?: ProcessSnapshot }
   | { id: string; role: 'assistant'; source: 'live'; live: LiveAssistant };
 
 /** 解析历史消息的附件列（JSON 数组字符串 → 图片地址列表；脏数据兜底为空）。 */
@@ -272,6 +300,85 @@ const ReasoningSection: React.FC<{ blocks: ReasoningBlock[]; streaming: boolean 
       )}
     </div>
   );
+};
+
+/** 过程叙述（commentary 相位正文块）：流式期展开、终态默认折叠——与正式答复视觉分层。 */
+const ProcessNarrative: React.FC<{ blocks: TextBlock[]; streaming: boolean }> = ({ blocks, streaming }) => {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (streaming) setOpen(true);
+  }, [streaming]);
+
+  if (blocks.length === 0) return null;
+  const text = blocks.map(b => b.text).join('\n');
+
+  return (
+    <div className="w-full mb-3 rounded-2xl border border-neutral-200/60 bg-white overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-neutral-50 transition-colors"
+      >
+        <FileText size={13} className="text-neutral-400 flex-shrink-0" />
+        <span className="text-[12px] font-bold text-neutral-500 flex-1">
+          过程叙述
+          <span className="ml-2 font-mono text-[10px] font-normal text-neutral-400">
+            {text.length} 字{streaming ? ' · 生成中' : ''}
+          </span>
+        </span>
+        {streaming
+          ? <Loader2 size={12} className="text-neutral-400 animate-spin" />
+          : open ? <ChevronDown size={13} className="text-neutral-400" /> : <ChevronRight size={13} className="text-neutral-400" />}
+      </button>
+      {open && (
+        <div className="px-4 pb-3 max-h-72 overflow-y-auto border-t border-neutral-100">
+          <MdContent text={text} />
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** 追加正文增量：全量 content 与分块 textBlocks 同步维护（分块驱动相位分流渲染）。 */
+const appendTextDelta = (live: LiveAssistant, stepIndex: number, delta: string): LiveAssistant => {
+  const blocks = [...(live.textBlocks ?? [])];
+  const last = blocks[blocks.length - 1];
+  if (last && last.step === stepIndex) {
+    blocks[blocks.length - 1] = { ...last, text: last.text + delta };
+  } else {
+    blocks.push({ step: stepIndex, phase: 'commentary', text: delta });
+  }
+  return { ...live, content: live.content + delta, textBlocks: blocks };
+};
+
+/** 轮次相位结算：StepFinished(terminalPhase) 回写分块相位。 */
+const markBlockPhase = (live: LiveAssistant, stepIndex: number, phase: string): LiveAssistant => {
+  if (!live.textBlocks) return live;
+  const blocks = live.textBlocks.map(b =>
+    b.step === stepIndex ? { ...b, phase: phase === 'final' ? 'final' as const : 'commentary' as const } : b);
+  return { ...live, textBlocks: blocks };
+};
+
+/**
+ * 终态相位兜底：无任何 final 块时把最后一个正文块抬为 final——
+ * 对应引擎"无工具调用轮即终轮"语义（含 L0 直答无 step 事件、终态整段补发两种形态）。
+ */
+const settleFinalPhase = (live: LiveAssistant): LiveAssistant => {
+  const blocks = live.textBlocks;
+  if (!blocks || blocks.length === 0 || blocks.some(b => b.phase === 'final')) return live;
+  const next = [...blocks];
+  next[next.length - 1] = { ...next[next.length - 1], phase: 'final' };
+  return { ...live, textBlocks: next };
+};
+
+/** 相位分流：commentary 进过程叙述，final 作正式答复（无分块信息时 content 全量兜底为答复）。 */
+const splitPhases = (blocks: TextBlock[] | undefined, content: string): { narrative: TextBlock[]; answer: string } => {
+  if (!blocks || blocks.length === 0) {
+    return { narrative: [], answer: content };
+  }
+  const narrative = blocks.filter(b => b.phase === 'commentary');
+  const answer = blocks.filter(b => b.phase === 'final').map(b => b.text).join('\n');
+  return { narrative, answer: answer || content };
 };
 
 const buildDownloadUrl = (partUrl: string): string => {
@@ -871,6 +978,10 @@ const InvokePage: React.FC = () => {
   const [catalog, setCatalog] = useState<AiCatalogVO | null>(null);
   /** 会话模型偏好解析出的 provider（null/'' = 平台默认） */
   const [resolvedProvider, setResolvedProvider] = useState<string | null>(null);
+  /** 会话模型偏好解析出的模型覆盖（null = provider 默认模型） */
+  const [resolvedModel, setResolvedModel] = useState<string | null>(null);
+  /** 会话模型偏好解析出的思考档位（null = 跟随 provider 全局配置） */
+  const [resolvedThinking, setResolvedThinking] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -982,6 +1093,7 @@ const InvokePage: React.FC = () => {
             id: `h-${m.id}`, role: 'assistant' as const, source: 'history' as const,
             content: m.content, reasoning: m.reasoningContent ?? undefined,
             model: m.model, tokens: m.tokens, createTime: m.createTime, plan, artifacts,
+            blocks: parseBlocks(m.blocksJson),
           };
         }));
     } catch (e: any) {
@@ -1060,10 +1172,14 @@ const InvokePage: React.FC = () => {
     let terminated = false;
     let gotEvent = false;
     let gotText = false;
+    // 归属校验后释放槽位：过期闭包（被新订阅取代的旧连接）绝不得删新控制器、
+    // 也不得为已取代的连接回退轮询——否则旧订阅失联残留，双订阅同写一气泡致文本逐块重复
+    const release = () => taskStreamRef.current.get(msgId) === ctrl
+      ? taskStreamRef.current.delete(msgId) : false;
     const finish = (after?: () => void) => {
       terminated = true;
       window.clearTimeout(watchdog);
-      taskStreamRef.current.delete(msgId);
+      release();
       after?.();
     };
     // 静默看门狗：长时间只有心跳没有业务事件（续跑事件出口异常）时回退轮询兜底
@@ -1074,7 +1190,7 @@ const InvokePage: React.FC = () => {
       }
     }, 45000);
     const onTerminal = () => {
-      updateLive(msgId, live => ({ ...live, resuming: false }));
+      updateLive(msgId, live => settleFinalPhase({ ...live, resuming: false }));
       // 正文已流式入气泡时保留现场（含过程叙述）；无正文流入（异常路径）才回读历史补齐
       const realSid = sid ?? sessionIdRef.current;
       if (realSid && !gotText) void loadHistory(realSid);
@@ -1086,7 +1202,7 @@ const InvokePage: React.FC = () => {
         if (d.blockType === 'text' && d.delta) {
           gotEvent = true;
           gotText = true;
-          updateLive(msgId, live => ({ ...live, content: live.content + d.delta }));
+          updateLive(msgId, live => appendTextDelta(live, d.stepIndex ?? 0, d.delta));
         }
       },
       onProgress: d => {
@@ -1117,7 +1233,7 @@ const InvokePage: React.FC = () => {
         }));
       },
       onFinal: () => finish(() => {
-        updateLive(msgId, live => ({ ...live, terminal: 'final', stop: undefined }));
+        updateLive(msgId, live => settleFinalPhase({ ...live, terminal: 'final', stop: undefined }));
         onTerminal();
       }),
       onRunFailed: d => finish(() => {
@@ -1128,13 +1244,13 @@ const InvokePage: React.FC = () => {
         updateLive(msgId, live => ({ ...live, terminal: 'cancelled', resuming: false }));
       }),
       onClose: () => {
-        // 流异常断开（未见终态）：回退轮询兜底
-        if (!terminated && taskStreamRef.current.delete(msgId)) {
+        // 流异常断开（未见终态）且本闭包仍持有槽位时，才回退轮询兜底
+        if (!terminated && release()) {
           void pollTaskAndReloadRef.current(msgId);
         }
       },
     }, ctrl.signal).catch(() => {
-      if (!terminated && taskStreamRef.current.delete(msgId)) {
+      if (!terminated && release()) {
         void pollTaskAndReloadRef.current(msgId);
       }
     });
@@ -1380,7 +1496,7 @@ const InvokePage: React.FC = () => {
                 break;
               }
             }
-            return { ...live, events };
+            return markBlockPhase({ ...live, events }, d.stepIndex, d.terminalPhase ?? 'commentary');
           });
         },
         onBlockStart: d => {
@@ -1410,7 +1526,7 @@ const InvokePage: React.FC = () => {
               }));
             }
           } else if (d.blockType === 'text' && d.delta) {
-            updateLive(asstId, live => ({ ...live, content: live.content + d.delta }));
+            updateLive(asstId, live => appendTextDelta(live, d.stepIndex ?? 0, d.delta));
           }
         },
         onToolCallStart: d => {
@@ -1493,7 +1609,7 @@ const InvokePage: React.FC = () => {
         },
         onFinal: result => {
           const sid = result.ext?.sessionId;
-          updateLive(asstId, live => ({
+          updateLive(asstId, live => settleFinalPhase({
             ...live,
             terminal: 'final',
             stop: result.stop,
@@ -1525,7 +1641,7 @@ const InvokePage: React.FC = () => {
             : { ...live, terminal: 'failed', errorMsg: '连接中断' });
           void refreshSessions();
         },
-      }, signal, approvalMode, images);
+      }, signal, approvalMode, images, resolvedProvider, resolvedModel, resolvedThinking);
     } catch (e: any) {
       if (e?.name !== 'AbortError') {
         updateLive(asstId, live => ({ ...live, terminal: 'failed', errorMsg: e.message || '调用失败' }));
@@ -1633,11 +1749,6 @@ const InvokePage: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <ModelPreferenceSelect
-              servicePrefix={config.SERVICE_BUTLER}
-              sessionId={sessionId}
-              onPreferenceResolved={setResolvedProvider}
-            />
             <Select
               compact
               className="min-w-[100px]"
@@ -1733,18 +1844,33 @@ const InvokePage: React.FC = () => {
                         <pre className="px-4 pb-3 max-h-56 overflow-y-auto text-[12px] leading-relaxed text-neutral-500 whitespace-pre-wrap">{msg.reasoning}</pre>
                       </details>
                     )}
+                    {/* 过程快照回放：执行步骤 / 思考块 / 过程叙述（刷新后重建执行过程视图） */}
+                    {msg.blocks?.events && msg.blocks.events.length > 0 && (
+                      <Timeline events={msg.blocks.events} streaming={false} />
+                    )}
+                    {msg.blocks?.reasonings && msg.blocks.reasonings.length > 0 && (
+                      <ReasoningSection blocks={msg.blocks.reasonings} streaming={false} />
+                    )}
+                    <ProcessNarrative
+                      blocks={(msg.blocks?.textBlocks ?? []).filter(b => b.phase !== 'final')}
+                      streaming={false}
+                    />
                     {msg.plan && msg.plan.length > 0 && (
                       <PlanLauncher steps={msg.plan} onOpen={() => setPlanDrawerFor(msg.id)} />
                     )}
                     <MdContent text={msg.content} />
-                    {msg.artifacts && msg.artifacts.length > 0 && (
-                      <div className="mt-2 space-y-2">
-                        {msg.artifacts.map((a, i) => (
-                          <ArtifactCard key={a.artifactId} artifact={a}
-                            onPreview={() => setPreview({ artifacts: msg.artifacts!, index: i })} />
-                        ))}
-                      </div>
-                    )}
+                    {(() => {
+                      const arts = msg.blocks?.artifacts && msg.blocks.artifacts.length > 0
+                        ? msg.blocks.artifacts : msg.artifacts;
+                      return arts && arts.length > 0 && (
+                        <div className="mt-2 space-y-2">
+                          {arts.map((a, i) => (
+                            <ArtifactCard key={a.artifactId} artifact={a}
+                              onPreview={() => setPreview({ artifacts: arts, index: i })} />
+                          ))}
+                        </div>
+                      );
+                    })()}
                     {(() => {
                       const parts = [msg.model, msg.tokens && msg.tokens > 0 ? `${msg.tokens} tokens` : null].filter(Boolean);
                       return parts.length > 0 && (
@@ -1771,20 +1897,29 @@ const InvokePage: React.FC = () => {
                   <Timeline events={live.events} streaming={isStreaming} />
                   <ReasoningSection blocks={live.reasonings} streaming={isStreaming} />
 
-                  {(live.content || live.errorMsg || (isStreaming && !live.content)) && (
-                    <div className={`w-full ${live.terminal === 'failed' ? 'px-5 py-4 rounded-2xl bg-red-50 border border-red-100' : ''}`}>
-                      {live.terminal === 'failed'
-                        ? <p className="text-[14px] text-red-600">{live.errorMsg || live.content || '调用失败'}</p>
-                        : <MdContent text={live.content} />}
-                      {isStreaming && !live.content && (
-                        <span className="flex gap-1.5 items-center mt-2 h-4">
-                          {[0, 0.15, 0.3].map((d, i) => (
-                            <span key={i} className="w-1.5 h-1.5 rounded-full bg-neutral-300 animate-pulse" style={{ animationDelay: `${d}s` }} />
-                          ))}
-                        </span>
-                      )}
-                    </div>
-                  )}
+                  {(() => {
+                    // 相位分流渲染：过程叙述与正式答复分层，不再把执行步骤误读为正文
+                    const { narrative, answer } = splitPhases(live.textBlocks, live.content);
+                    return (
+                      <>
+                        <ProcessNarrative blocks={narrative} streaming={isStreaming} />
+                        {(answer || live.errorMsg || (isStreaming && !answer)) && (
+                          <div className={`w-full ${live.terminal === 'failed' ? 'px-5 py-4 rounded-2xl bg-red-50 border border-red-100' : ''}`}>
+                            {live.terminal === 'failed'
+                              ? <p className="text-[14px] text-red-600">{live.errorMsg || answer || '调用失败'}</p>
+                              : <MdContent text={answer} />}
+                            {isStreaming && !answer && (
+                              <span className="flex gap-1.5 items-center mt-2 h-4">
+                                {[0, 0.15, 0.3].map((d, i) => (
+                                  <span key={i} className="w-1.5 h-1.5 rounded-full bg-neutral-300 animate-pulse" style={{ animationDelay: `${d}s` }} />
+                                ))}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
 
                   {live.artifacts.length > 0 && (
                     <div className="mt-2 space-y-2">
@@ -1837,6 +1972,14 @@ const InvokePage: React.FC = () => {
 
         {/* Input */}
         <div className="px-6 py-4 border-t border-neutral-100 flex-shrink-0">
+          {/* 生成控制工具条：模型 + 思考贴近输入区（控制的是"这轮怎么生成"） */}
+          <div className="mb-2.5 flex items-center gap-2">
+            <ModelPreferenceSelect
+              servicePrefix={config.SERVICE_BUTLER}
+              sessionId={sessionId}
+              onPreferenceResolved={(p, m, t) => { setResolvedProvider(p); setResolvedModel(m); setResolvedThinking(t); }}
+            />
+          </div>
           {/* 待发送图片预览条（多图，可单独移除） */}
           {pendingImages.length > 0 && (
             <div className="flex gap-2 mb-2.5 flex-wrap">

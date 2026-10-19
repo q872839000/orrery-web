@@ -7,8 +7,7 @@ import {
   RefreshCw, Search, ScrollText, AlertCircle,
   CheckCircle, XCircle, Activity, Globe, Server as ServerIcon, Link2, Cog,
   GitBranch, Zap, AlertTriangle, X, Maximize2, Minimize2,
-  Clock, ShieldAlert, Cpu, ArrowRightLeft, CornerDownRight,
-  ZoomIn, ZoomOut, Focus
+  Clock, ShieldAlert, Cpu, ArrowRightLeft, CornerDownRight
 } from 'lucide-react';
 import { THEME } from '../../shared/styles/theme';
 import Select from '../../shared/components/ui/Select';
@@ -29,163 +28,7 @@ const SOURCE_CFG: Record<string, { label: string; icon: typeof Globe; color: str
 };
 
 const fmtTime = (ts?: number) => ts ? new Date(ts).toLocaleString('zh-CN') : '-';
-const fmtDuration = (ms: number) => ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${ms}ms`;
-
-// ==================== Tree Layout Algorithm ====================
-
-const NODE_W = 192;
-const NODE_H = 80;
-const GAP_H = 32;
-const GAP_V = 48;
-const PAD = 32;
-
-interface LayoutNode {
-  span: SpanNodeType;
-  x: number;
-  y: number;
-  children: LayoutNode[];
-}
-
-function subtreeWidth(span: SpanNodeType): number {
-  if (!span.children?.length) return NODE_W;
-  const cw = span.children.reduce((s, c) => s + subtreeWidth(c) + GAP_H, -GAP_H);
-  return Math.max(NODE_W, cw);
-}
-
-function layoutNode(span: SpanNodeType, x: number, y: number): LayoutNode {
-  const sw = subtreeWidth(span);
-  const node: LayoutNode = {
-    span, x: x + sw / 2 - NODE_W / 2, y, children: [],
-  };
-  if (span.children?.length) {
-    let cx = x;
-    for (const child of span.children) {
-      const cw = subtreeWidth(child);
-      node.children.push(layoutNode(child, cx, y + NODE_H + GAP_V));
-      cx += cw + GAP_H;
-    }
-  }
-  return node;
-}
-
-function flattenNodes(node: LayoutNode): LayoutNode[] {
-  return [node, ...node.children.flatMap(flattenNodes)];
-}
-
-interface ConnectorEdge { px: number; py: number; cx: number; cy: number; }
-
-function collectEdges(node: LayoutNode): ConnectorEdge[] {
-  const edges: ConnectorEdge[] = [];
-  for (const child of node.children) {
-    edges.push({
-      px: node.x + NODE_W / 2,
-      py: node.y + NODE_H,
-      cx: child.x + NODE_W / 2,
-      cy: child.y,
-    });
-    edges.push(...collectEdges(child));
-  }
-  return edges;
-}
-
-function connectorPath(e: ConnectorEdge): string {
-  const midY = (e.py + e.cy) / 2;
-  if (Math.abs(e.px - e.cx) < 1) {
-    return `M ${e.px} ${e.py} L ${e.cx} ${e.cy}`;
-  }
-  const r = Math.min(20, Math.abs(e.cx - e.px) / 2, (e.cy - e.py) / 2);
-  const dir = e.cx > e.px ? 1 : -1;
-  return [
-    `M ${e.px} ${e.py}`,
-    `L ${e.px} ${midY - r}`,
-    `Q ${e.px} ${midY} ${e.px + dir * r} ${midY}`,
-    `L ${e.cx - dir * r} ${midY}`,
-    `Q ${e.cx} ${midY} ${e.cx} ${midY + r}`,
-    `L ${e.cx} ${e.cy}`,
-  ].join(' ');
-}
-
-// ==================== Span Node Card ====================
-
-const FlowNodeCard: React.FC<{
-  span: SpanNodeType; totalDuration: number;
-  selected: boolean;
-}> = ({ span, totalDuration, selected }) => {
-  const isErr = !span.success;
-  const isSlow = span.success && span.duration > 0 && (span.actualDuration / span.duration) > 0.7;
-  
-  let theme = {
-    ring: 'ring-indigo-500/30',
-    border: 'border-indigo-100',
-    bg: 'bg-white',
-    icon: <Cpu size={14} className="text-indigo-600" />,
-    serviceBg: 'bg-indigo-50',
-    serviceText: 'text-indigo-600',
-    bar: 'bg-indigo-500'
-  };
-  if (isErr) {
-    theme = {
-      ring: 'ring-rose-500/30',
-      border: 'border-rose-200',
-      bg: 'bg-rose-50/40',
-      icon: <ShieldAlert size={14} className="text-rose-600" />,
-      serviceBg: 'bg-rose-100',
-      serviceText: 'text-rose-700',
-      bar: 'bg-rose-500'
-    };
-  } else if (isSlow) {
-    theme = {
-      ring: 'ring-amber-500/30',
-      border: 'border-amber-200',
-      bg: 'bg-amber-50/40',
-      icon: <Clock size={14} className="text-amber-600" />,
-      serviceBg: 'bg-amber-100',
-      serviceText: 'text-amber-700',
-      bar: 'bg-amber-500'
-    };
-  }
-
-  const pct = totalDuration > 0 ? Math.max((span.duration / totalDuration) * 100, 1.5) : 0;
-
-  return (
-    <div className={`group relative flex flex-col rounded-[20px] border backdrop-blur-md shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)]
-      hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 cursor-pointer overflow-hidden
-      ${theme.bg} ${theme.border}
-      ${selected ? `ring-[3px] ring-offset-2 ${theme.ring} border-transparent` : ''}`}
-      style={{ width: NODE_W, height: NODE_H }}>
-
-      <div className="flex flex-1 flex-col justify-between p-3">
-        <div className="flex items-start gap-2">
-          <div className="mt-0.5">{theme.icon}</div>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-bold tracking-tight text-neutral-800" title={span.methodName}>
-              {span.methodName ?? '?'}
-            </div>
-            <div className="mt-0.5 truncate font-mono text-[11px] text-neutral-400" title={span.className}>
-              {span.className ?? ''}
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-2 flex items-center justify-between gap-2">
-          <span className={`max-w-[82px] truncate rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${theme.serviceBg} ${theme.serviceText}`}>
-            {span.serviceName ?? 'UNKNOWN'}
-          </span>
-          <div className="flex flex-col items-end">
-            <span className={`font-mono text-sm font-black tracking-tight ${isErr ? 'text-rose-600' : 'text-neutral-700'}`}>
-              {fmtDuration(span.duration)}
-            </span>
-          </div>
-        </div>
-      </div>
-      
-      {/* Progress bar at the absolute bottom */}
-      <div className="h-1 bg-neutral-100 w-full relative z-10 opacity-70 group-hover:opacity-100 transition-opacity">
-        <div className={`h-full ${theme.bar} transition-all duration-500`} style={{ width: `${Math.min(pct, 100)}%` }} />
-      </div>
-    </div>
-  );
-};
+const fmtDuration = (ms: number) => ms >= 60000 ? `${(ms / 60000).toFixed(1)}min` : ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${ms}ms`;
 
 // ==================== Span Detail Drawer ====================
 
@@ -307,148 +150,45 @@ const SpanDetailDrawer: React.FC<{ span: SpanNodeType | null; onClose: () => voi
   );
 };
 
-// ==================== Trace Flow Diagram ====================
+// ==================== Trace Waterfall ====================
 
 const TraceFlowDiagram: React.FC<{ detail: TraceDetailVO }> = ({ detail }) => {
   const [selectedId, setSelectedId] = useState<string | number | null>(null);
 
   const getSpanKey = (span: SpanNodeType) => span.id ?? `${span.className}-${span.methodName}-${span.startTime}`;
 
-  const { allNodes, allEdges, totalW, totalH } = useMemo(() => {
-    const spanRoots = Array.isArray(detail.spanTree) ? detail.spanTree : [];
-    let tw = 0;
-    const roots: LayoutNode[] = [];
-    for (const root of spanRoots) {
-      const ln = layoutNode(root, tw, 0);
-      roots.push(ln);
-      tw += subtreeWidth(root) + GAP_H;
-    }
-    tw = Math.max(tw - GAP_H, NODE_W);
-    const flat = roots.flatMap(flattenNodes);
-    const maxY = flat.reduce((m, n) => Math.max(m, n.y), 0);
-    const edges = roots.flatMap(collectEdges);
-    return { allNodes: flat, allEdges: edges, totalW: tw, totalH: maxY + NODE_H };
+  // 展开为时间轴行：主树前序遍历（兄弟按开始偏移排序）；
+  // 无子挂载点的孤立根（异步回流消费等）移到末尾"关联异步"区，仍在同一时间轴上
+  const { rows, wallMs } = useMemo(() => {
+    const roots = Array.isArray(detail.spanTree) ? detail.spanTree : [];
+    const mainRoots = roots.filter(r => (r.children?.length ?? 0) > 0);
+    const layoutRoots = (mainRoots.length > 0 ? mainRoots : roots)
+      .slice().sort((x, y) => x.offsetFromTraceStart - y.offsetFromTraceStart);
+    const orphanRoots = mainRoots.length > 0 ? roots.filter(r => !mainRoots.includes(r)) : [];
+
+    const out: { span: SpanNodeType; orphan: boolean }[] = [];
+    const walk = (n: SpanNodeType) => {
+      out.push({ span: n, orphan: false });
+      (n.children ?? []).slice().sort((x, y) => x.offsetFromTraceStart - y.offsetFromTraceStart).forEach(walk);
+    };
+    layoutRoots.forEach(walk);
+    orphanRoots.slice().sort((x, y) => x.offsetFromTraceStart - y.offsetFromTraceStart)
+      .forEach(r => out.push({ span: r, orphan: true }));
+
+    const wall = Math.max(1, out.reduce((m, r) =>
+      Math.max(m, (r.span.offsetFromTraceStart ?? 0) + (r.span.duration ?? 0)), 0));
+    return { rows: out, wallMs: wall };
   }, [detail.spanTree]);
 
-  const svgW = totalW + PAD * 2;
-  const svgH = totalH + PAD * 2;
-
-  // Zoom & Pan state
-  const [scale, setScale] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const wasDraggingRef = React.useRef(false);
-  const containerRef = React.useRef<HTMLDivElement>(null);
-  const recenter = useCallback(() => {
-    if (!containerRef.current) return;
-    const { clientWidth } = containerRef.current;
-    setOffset({
-      x: (clientWidth - svgW) / 2,
-      y: 32,
-    });
-  }, [svgW]);
-
-  useEffect(() => {
-    recenter();
-    setScale(1);
-  }, [recenter, svgH]);
-
-  useEffect(() => {
-    window.addEventListener('resize', recenter);
-    return () => window.removeEventListener('resize', recenter);
-  }, [recenter]);
-
-  // Drag-to-pan: use window-level mousemove/mouseup so drag works even outside canvas
-  const handleCanvasMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0) return;
-    const startX = e.clientX;
-    const startY = e.clientY;
-    const initX = offset.x;
-    const initY = offset.y;
-    let moved = false;
-
-    const onMove = (ev: MouseEvent) => {
-      const dx = ev.clientX - startX;
-      const dy = ev.clientY - startY;
-      if (!moved && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
-        moved = true;
-        setIsDragging(true);
-      }
-      if (moved) {
-        setOffset({ x: initX + dx, y: initY + dy });
-      }
-    };
-
-    const onUp = () => {
-      wasDraggingRef.current = moved;
-      setIsDragging(false);
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      window.setTimeout(() => {
-        wasDraggingRef.current = false;
-      }, 0);
-    };
-
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  };
-
-  const zoomIn = () => setScale(s => Math.min(s + 0.15, 2.5));
-  const zoomOut = () => setScale(s => Math.max(s - 0.15, 0.2));
-  const zoomReset = () => {
-    setScale(1);
-    recenter();
-  };
-
-  const handleWheel = (e: React.WheelEvent) => {
-    // Only scale if using wheel.
-    // NOTE: do not call preventDefault here directly because React wheel events are passive.
-    // The passive false listener in useEffect handles the preventDefault.
-    e.stopPropagation();
-    
-    // Zoom sensitivity
-    const zoomFactor = -e.deltaY * 0.001;
-    let newScale = scale + zoomFactor;
-    newScale = Math.min(Math.max(0.2, newScale), 2.5);
-
-    // Zoom towards mouse pointer
-    if (containerRef.current) {
-      const rect = containerRef.current.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
-
-      // Calculate how far the mouse is into the scaled canvas
-      const xRatio = (mouseX - offset.x) / scale;
-      const yRatio = (mouseY - offset.y) / scale;
-
-      // New offsets based on mouse position
-      const newOffsetX = mouseX - (xRatio * newScale);
-      const newOffsetY = mouseY - (yRatio * newScale);
-
-      setScale(newScale);
-      setOffset({ x: newOffsetX, y: newOffsetY });
-    }
-  };
-
-  // Prevent default scroll behavior when wheeling on canvas
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const handler = (e: WheelEvent) => {
-      e.preventDefault();
-    };
-    el.addEventListener('wheel', handler, { passive: false });
-    return () => el.removeEventListener('wheel', handler);
-  }, []);
-
   const selectedSpan = selectedId != null
-    ? allNodes.find(n => getSpanKey(n.span) === selectedId)?.span ?? null
+    ? (rows.find(r => getSpanKey(r.span) === selectedId)?.span ?? null)
     : null;
 
   const summary = detail.summary;
+  const ticks = [0, 0.25, 0.5, 0.75, 1];
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {/* Summary header */}
       <div>
         <div className="flex items-center gap-2 mb-2">
@@ -467,7 +207,10 @@ const TraceFlowDiagram: React.FC<{ detail: TraceDetailVO }> = ({ detail }) => {
           {summary && (<>
             <span><strong className="text-black">{summary.totalSpans}</strong> Span</span>
             <span><strong className="text-black">{summary.totalServices}</strong> 服务</span>
-            <span><strong className="text-black">{fmtDuration(detail.totalDuration)}</strong> 总耗时</span>
+            <span><strong className="text-black">{fmtDuration(detail.totalDuration)}</strong> 请求耗时</span>
+            {wallMs > detail.totalDuration && (
+              <span title="含异步段（引擎处理/回流消费）的端到端全程"><strong className="text-amber-600">{fmtDuration(wallMs)}</strong> 链路全程</span>
+            )}
             <span><strong className="text-black">{summary.maxDepth}</strong> 最大深度</span>
             {summary.failedSpans > 0 && (
               <span className="text-red-500"><AlertTriangle size={10} className="inline" /> <strong>{summary.failedSpans}</strong> 失败</span>
@@ -487,86 +230,83 @@ const TraceFlowDiagram: React.FC<{ detail: TraceDetailVO }> = ({ detail }) => {
             {detail.clientIp && <span className="font-mono">{detail.clientIp}</span>}
           </div>
         )}
-        <div className="mt-2 text-[11px] text-neutral-400">拖动画布，滚轮缩放，点击节点查看详情</div>
+        <div className="mt-2 text-[11px] text-neutral-400">时间轴从左到右为链路全程，条块长度 = 该步耗时；点击行查看入参 / 出参 / 错误详情</div>
       </div>
 
-      {/* Flow diagram canvas */}
-      <div ref={containerRef}
-        className={`relative h-[580px] overflow-hidden rounded-2xl border border-neutral-200/80 bg-[#fafafa] select-none
-          ${isDragging ? 'cursor-grabbing' : 'cursor-grab'} md:h-[680px] 2xl:h-[780px]`}
-        style={{ backgroundImage: 'radial-gradient(#e5e5e5 1px, transparent 1px)', backgroundSize: `${20 * scale}px ${20 * scale}px`, backgroundPosition: `${offset.x}px ${offset.y}px` }}
-        onMouseDown={handleCanvasMouseDown}
-        onClick={() => setSelectedId(null)}
-        onWheel={handleWheel}>
-
-        <div
-          className="absolute right-3 top-3 z-20 flex flex-col gap-1 rounded-xl border border-neutral-200/60 bg-white/92 p-1.5 shadow-sm backdrop-blur-md"
-          onMouseDown={(event) => event.stopPropagation()}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <button onClick={(e) => { e.stopPropagation(); zoomIn(); }} className="rounded-lg p-2 text-neutral-500 transition-all hover:bg-neutral-100 hover:text-black" title="放大"><ZoomIn size={16}/></button>
-          <button onClick={(e) => { e.stopPropagation(); zoomReset(); }} className="rounded-lg p-2 text-neutral-500 transition-all hover:bg-neutral-100 hover:text-black" title="重置"><Focus size={16}/></button>
-          <button onClick={(e) => { e.stopPropagation(); zoomOut(); }} className="rounded-lg p-2 text-neutral-500 transition-all hover:bg-neutral-100 hover:text-black" title="缩小"><ZoomOut size={16}/></button>
-          <div className="text-[9px] font-mono text-neutral-400 text-center py-1 font-bold">{Math.round(scale * 100)}%</div>
+      {/* Waterfall */}
+      <div className="rounded-2xl border border-neutral-200/80 bg-white overflow-hidden">
+        {/* 时间刻度头 */}
+        <div className="flex items-stretch border-b border-neutral-100 bg-neutral-50/60">
+          <div className="w-[300px] flex-shrink-0 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-neutral-400 flex items-center">
+            Span · {rows.length}
+          </div>
+          <div className="relative flex-1">
+            {ticks.map(t => (
+              <span key={t} className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 text-[10px] font-mono text-neutral-400"
+                style={{ left: `${t * 100}%` }}>
+                {fmtDuration(wallMs * t)}
+              </span>
+            ))}
+          </div>
         </div>
 
-        {/* Transform Layer */}
-        {allNodes.length === 0 ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-neutral-300">
-            <GitBranch size={30} strokeWidth={1} />
+        {rows.length === 0 ? (
+          <div className="h-32 flex flex-col items-center justify-center gap-2 text-neutral-300">
+            <GitBranch size={26} strokeWidth={1} />
             <span className="text-sm">暂无可渲染的调用链节点</span>
           </div>
-        ) : (
-          <div className="absolute top-0 left-0 origin-top-left transition-transform duration-75"
-            style={{ width: svgW, height: svgH, transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}>
-            
-            {/* SVG connector layer */}
-            <svg className="absolute inset-0 pointer-events-none" width={svgW} height={svgH}>
-              <defs>
-                <marker id="flow-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
-                  <polygon points="0 0, 8 3, 0 6" className="fill-indigo-400" />
-                </marker>
-                <marker id="flow-arrow-err" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
-                  <polygon points="0 0, 8 3, 0 6" className="fill-red-400" />
-                </marker>
-              </defs>
-              {allEdges.map((e, i) => {
-                const childSpan = allNodes.find(n =>
-                  Math.abs(n.x + NODE_W / 2 - e.cx) < 1 && Math.abs(n.y - e.cy) < 1
-                )?.span;
-                const isErr = childSpan && !childSpan.success;
-                return (
-                  <path key={i}
-                    d={connectorPath({ px: e.px + PAD, py: e.py + PAD, cx: e.cx + PAD, cy: e.cy + PAD })}
-                    fill="none"
-                    className={isErr ? 'stroke-red-300' : 'stroke-indigo-300'}
-                    strokeWidth="2.5"
-                    strokeDasharray={isErr ? '6 4' : 'none'}
-                    markerEnd={isErr ? 'url(#flow-arrow-err)' : 'url(#flow-arrow)'} 
-                    style={{ filter: 'drop-shadow(0px 2px 2px rgba(0,0,0,0.05))' }} />
-                );
-              })}
-            </svg>
-
-            {allNodes.map((node) => {
-              const spanKey = getSpanKey(node.span);
-              return (
-                <div key={spanKey}
-                  className="absolute transition-all duration-200"
-                  style={{ left: node.x + PAD, top: node.y + PAD }}
-                  onMouseDown={(event) => event.stopPropagation()}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (wasDraggingRef.current) return;
-                    setSelectedId(prev => prev === spanKey ? null : spanKey);
-                  }}>
-                  <FlowNodeCard span={node.span} totalDuration={detail.totalDuration}
-                    selected={selectedId === spanKey} />
+        ) : rows.map(({ span, orphan }, i) => {
+          const key = getSpanKey(span);
+          const active = selectedId === key;
+          const isErr = !span.success;
+          const isSlow = span.success && span.duration > 0 && (span.actualDuration / span.duration) > 0.7;
+          const leftPct = Math.min((span.offsetFromTraceStart / wallMs) * 100, 100);
+          const widthPct = Math.max((span.duration / wallMs) * 100, 0.4);
+          const labelRight = leftPct + widthPct <= 78;
+          const orphanHeader = orphan && (i === 0 || !rows[i - 1].orphan);
+          return (
+            <React.Fragment key={key}>
+              {orphanHeader && (
+                <div className="px-3 py-1.5 bg-amber-50/60 border-y border-amber-100 text-[10px] font-bold text-amber-600">
+                  关联异步回流 · 由本链路触发（无父子挂载点）
                 </div>
-              );
-            })}
-          </div>
-        )}
+              )}
+              <button onClick={() => setSelectedId(prev => prev === key ? null : key)}
+                className={`w-full flex items-center text-left transition-colors border-b border-neutral-50
+                  ${active ? 'bg-indigo-50/70' : 'hover:bg-neutral-50'}`}>
+                {/* 名称列（按深度缩进） */}
+                <div className="w-[300px] flex-shrink-0 py-2 min-w-0 flex items-center gap-1.5"
+                  style={{ paddingLeft: 12 + Math.max(0, (span.depth ?? 1) - 1) * 16, paddingRight: 12 }}>
+                  {isErr
+                    ? <XCircle size={12} className="flex-shrink-0 text-rose-500" />
+                    : isSlow
+                      ? <Clock size={12} className="flex-shrink-0 text-amber-500" />
+                      : <CheckCircle size={12} className="flex-shrink-0 text-emerald-500" />}
+                  <div className="min-w-0">
+                    <div className="truncate text-[12px] font-bold text-neutral-800">{span.methodName ?? '-'}</div>
+                    <div className="truncate font-mono text-[10px] text-neutral-400">{span.className ?? ''}</div>
+                  </div>
+                </div>
+                {/* 时间轴条块 */}
+                <div className="relative flex-1 h-9">
+                  {ticks.filter(t => t > 0 && t < 1).map(t => (
+                    <span key={t} className="absolute top-0 bottom-0 w-px bg-neutral-100" style={{ left: `${t * 100}%` }} />
+                  ))}
+                  <div className={`absolute top-1/2 -translate-y-1/2 h-4 rounded-md
+                      ${isErr ? 'bg-rose-400' : isSlow ? 'bg-amber-400' : 'bg-indigo-400'}`}
+                    style={{ left: `${leftPct}%`, width: `${widthPct}%` }} />
+                  <span className={`absolute top-1/2 -translate-y-1/2 text-[10px] font-mono whitespace-nowrap
+                      ${isErr ? 'text-rose-600' : 'text-neutral-500'}`}
+                    style={labelRight
+                      ? { left: `calc(${leftPct + widthPct}% + 6px)` }
+                      : { right: `calc(${100 - leftPct}% + 6px)` }}>
+                    {fmtDuration(span.duration)}
+                  </span>
+                </div>
+              </button>
+            </React.Fragment>
+          );
+        })}
       </div>
 
       {/* Detail drawer (shown when a node is selected) */}
@@ -752,9 +492,9 @@ const AuditPage: React.FC = () => {
                       <td className="px-2 py-2.5 text-center">
                         {r.traceId ? (
                           <button onClick={() => openDrawer(r.traceId!)}
-                            className="p-1 rounded-lg hover:bg-indigo-50 text-indigo-400 hover:text-indigo-600 transition-all"
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-indigo-50 text-indigo-500 hover:text-indigo-700 text-[11px] font-bold transition-all"
                             title="查看调用链路">
-                            <GitBranch size={14} />
+                            <GitBranch size={13} />链路
                           </button>
                         ) : <span className="text-neutral-200"><GitBranch size={14} /></span>}
                       </td>
@@ -778,7 +518,11 @@ const AuditPage: React.FC = () => {
                       </td>
                       <td className="px-3 py-2.5 font-mono text-neutral-400 text-[11px] truncate max-w-[140px]">
                         {r.requestMethod && <span className="font-bold mr-1">{r.requestMethod}</span>}
-                        {r.requestUri ?? '-'}
+                        {r.requestUri ?? (r.className
+                          ? <span className="text-indigo-400" title={`${r.className}.${r.methodName ?? ''}`}>
+                              {r.className}{r.methodName ? ` · ${r.methodName}` : ''}
+                            </span>
+                          : '-')}
                       </td>
                       <td className="px-3 py-2.5">
                         {r.success === true && <CheckCircle size={13} className="text-emerald-500" />}
@@ -786,7 +530,7 @@ const AuditPage: React.FC = () => {
                         {r.success == null && <Activity size={13} className="text-neutral-300" />}
                       </td>
                       <td className="px-3 py-2.5 text-neutral-400 font-mono text-[11px]">
-                        {r.duration != null ? `${r.duration}ms` : '-'}
+                        {r.duration != null ? fmtDuration(r.duration) : '-'}
                       </td>
                       <td className="px-3 py-2.5 text-neutral-600 max-w-[220px]">
                         {r.errorMessage

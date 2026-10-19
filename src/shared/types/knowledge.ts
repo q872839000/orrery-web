@@ -211,6 +211,10 @@ export interface KnowledgeChatRequest {
   knowledgeAppIds?: string[];
   searchModel?: SearchModel;
   topK?: number;
+  /** 请求级 LLM 提供商覆盖（新会话首轮尚无会话偏好可读，必须随请求携带） */
+  llmProvider?: string;
+  /** 请求级 LLM 模型覆盖（null = 提供商默认模型） */
+  llmModel?: string;
 }
 
 /** 答案引用条目（CitationVO） */

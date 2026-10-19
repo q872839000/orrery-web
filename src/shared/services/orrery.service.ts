@@ -53,6 +53,8 @@ export interface LogRecord {
   serverIp?: string;
   requestMethod?: string;
   requestUri?: string;
+  className?: string;
+  methodName?: string;
   requestParams?: string;
   clientIp?: string;
   responseStatus?: number;
@@ -503,7 +505,10 @@ export const invokeButlerStream = async (
   callbacks: ButlerStreamCallbacks,
   signal?: AbortSignal,
   approvalMode?: string | null,
-  images?: string[]
+  images?: string[],
+  llmProvider?: string | null,
+  llmModel?: string | null,
+  thinking?: string | null
 ) => {
   const token = localStorage.getItem('token');
   const url = `${GATEWAY_BASE}${B}/butler/invoke${agentId ? '/' + encodeURIComponent(agentId) : ''}`;
@@ -512,6 +517,12 @@ export const invokeButlerStream = async (
   if (sessionId) body.sessionId = sessionId;
   if (approvalMode) body.approvalMode = approvalMode;
   if (images && images.length > 0) body.images = images;
+  // 会话模型覆盖随请求携带（服务端"钉到会话"语义）——新会话首轮必须走此通道，
+  // 否则规划器读会话偏好时尚未写入，能力门控与路由都会回落默认 provider
+  if (llmProvider) body.llmProvider = llmProvider;
+  if (llmModel) body.llmModel = llmModel;
+  // 思考偏好同通道钉到会话（off/on/low/medium/high；仅对声明思考控制协议的 provider 生效）
+  if (thinking) body.thinking = thinking;
 
   let response: Response;
   try {
@@ -656,6 +667,8 @@ export interface ButlerChatMessage {
   /** 附件列表（JSON 数组字符串，元素为图片 data URI / URL；仅用户消息可携带） */
   attachments?: string | null;
   reasoningContent?: string;
+  /** 运行过程快照 JSON（v1：events/reasonings/textBlocks/artifacts/meta；无过程的单次应答为空） */
+  blocksJson?: string | null;
   tokens?: number;
   model?: string;
   durationMs?: number;

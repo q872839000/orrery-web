@@ -17,9 +17,9 @@ export const graphService = {
   entities: (params: { appId: string; type?: string; q?: string; page?: number; size?: number }) =>
     get('/cy-knowledge-repository/knowledge/graph/entities', { params }).then(res => unwrap<PageResult<GraphEntity>>(res)),
 
-  /** 实体详情（邻接关系 + 出处 chunks） */
-  entityDetail: (entityId: string) =>
-    get(`/cy-knowledge-repository/knowledge/graph/entities/${encodeURIComponent(entityId)}`).then(res => unwrap<GraphEntityDetail>(res)),
+  /** 实体详情（邻接关系 + 出处 chunks；appId 后端亦可从 entityId 解析，传入作权限校验） */
+  entityDetail: (entityId: string, appId: string) =>
+    get(`/cy-knowledge-repository/knowledge/graph/entities/${encodeURIComponent(entityId)}`, { params: { appId } }).then(res => unwrap<GraphEntityDetail>(res)),
 
   /** 可视化子图（nodes/edges，depth 默认 2 上限 3） */
   subgraph: (appId: string, entityId: string, depth: number) =>

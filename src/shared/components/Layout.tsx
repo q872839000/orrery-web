@@ -11,6 +11,8 @@ const Layout: React.FC = () => {
   const { mobileSidebarOpen, closeMobileSidebar } = useUIStore();
   const isPortal = location.pathname === '/portal';
   const isScenario = location.pathname === '/orrery/scenario';
+  // 管家对话工作区自管页边距（主面板距页缘 8~12px）：主区免用全局内边距，由页面自行排布
+  const isInvokeWorkspace = location.pathname === '/orrery/invoke';
   const isFullPage = isPortal || isScenario;
 
   useEffect(() => {
@@ -27,7 +29,7 @@ const Layout: React.FC = () => {
           <Navbar />
           <main
             className={`min-h-0 flex-1 ${
-              isFullPage
+              isFullPage || isInvokeWorkspace
                 ? 'overflow-hidden p-0'
                 : 'overflow-y-auto px-4 pb-4 pt-2 sm:px-5 lg:px-6'
             }`}

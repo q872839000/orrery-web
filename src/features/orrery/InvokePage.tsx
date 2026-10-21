@@ -188,70 +188,123 @@ const TimelineEvent: React.FC<{ ev: TimelineItem }> = ({ ev }) => {
   );
 };
 
-/** 过程时间线：用户频道事件直接展示；调试频道（引擎轮次/LLM/追踪）折叠进「调试信息」。
- *  文字统一 12px 中性灰，与 14px 正文形成层级区分。 */
-const Timeline: React.FC<{ events: TimelineItem[]; streaming: boolean }> = ({ events, streaming }) => {
-  const [isOpen, setIsOpen] = useState(false);
+/** 执行过程统一折叠区：任务规划进度 + 时间线 + 思考块 + 过程叙述合并为单个可折叠段。
+ *  流式期自动展开跟随执行，终态自动收起为一行摘要——助手消息不再被拆成多张小卡片，
+ *  正式答复成为视觉主体（过程信息一行可及，点开即看全程）。 */
+const ProcessSection: React.FC<{
+  events: TimelineItem[];
+  reasonings: ReasoningBlock[];
+  narrative: TextBlock[];
+  streaming: boolean;
+  plan?: PlanStep[];
+  onOpenPlan?: () => void;
+}> = ({ events, reasonings, narrative, streaming, plan, onOpenPlan }) => {
+  const [open, setOpen] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
+  /** 用户手动切换后停止自动接管（避免终态收起打断阅读） */
+  const manualRef = useRef(false);
 
   useEffect(() => {
-    if (streaming) setIsOpen(true);
+    if (!manualRef.current) setOpen(streaming);
   }, [streaming]);
 
   const userEvents = events.filter(e => !e.debug);
   const debugEvents = events.filter(e => e.debug);
+  const reasoningText = reasonings.map(b => (b.label ? `【${b.label}】\n` : '') + b.text).join('\n\n');
+  const narrativeText = narrative.map(b => b.text).join('\n');
 
-  if (events.length === 0 && !streaming) return null;
-  const summary = streaming && userEvents.length === 0
-    ? '管家正在处理...'
-    : streaming ? '引擎执行中...'
-    : `执行了 ${userEvents.length} 个步骤`;
+  if (events.length === 0 && reasonings.length === 0 && narrative.length === 0 && !streaming) return null;
+
+  const parts: string[] = [];
+  if (userEvents.length > 0) parts.push(`${userEvents.length} 个步骤`);
+  if (reasoningText) parts.push(`思考 ${reasoningText.length} 字`);
+  if (narrativeText) parts.push(`叙述 ${narrativeText.length} 字`);
+  const summary = `执行过程${parts.length > 0 ? ` · ${parts.join(' · ')}` : ''}`;
+
+  const planSteps = plan ?? [];
+  const planDone = planSteps.filter(s => ['SUCCEEDED', 'FAILED', 'SKIPPED', 'CANCELED'].includes(s.status ?? '')).length;
+  const planFailed = planSteps.filter(s => s.status === 'FAILED').length;
+  const planRunning = planSteps.some(s => s.status === 'RUNNING');
+  const planPct = planSteps.length ? Math.round((planDone / planSteps.length) * 100) : 0;
+  const showPlanPill = planSteps.length > 0 && !!onOpenPlan;
 
   return (
-    <div className="w-full mb-4">
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 text-neutral-400 hover:text-neutral-600 transition-colors py-1 group"
-      >
-        <div className="w-6 h-6 rounded-md flex items-center justify-center group-hover:bg-neutral-100 transition-colors">
-          {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        </div>
-        <span className="text-[12.5px]">{summary}</span>
-        {streaming && <Loader2 size={12} className="animate-spin ml-1 text-neutral-400" />}
-      </button>
+    <div className="mb-3 w-full">
+      {/* 摘要行：过程折叠开关 + 任务规划进度（点击打开 DAG 抽屉） */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <button
+          onClick={() => { manualRef.current = true; setOpen(v => !v); }}
+          className="group flex items-center gap-1 rounded-md py-0.5 pr-1 text-neutral-400 transition-colors hover:text-neutral-700"
+        >
+          <span className="flex h-5 w-5 items-center justify-center rounded-md transition-colors group-hover:bg-neutral-100">
+            {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          </span>
+          <span className="text-[12px] font-medium">{summary}</span>
+          {streaming && <Loader2 size={11} className="ml-0.5 animate-spin" />}
+        </button>
+        {showPlanPill && (
+          <button
+            onClick={onOpenPlan}
+            title="查看任务规划"
+            className="flex items-center gap-2 rounded-xl border border-neutral-200/70 bg-white/80 px-2.5 py-1.5 transition-all hover:border-violet-300 hover:shadow-sm"
+          >
+            <GitBranch size={12} className="shrink-0 text-neutral-400" />
+            <span className="shrink-0 text-[11px] font-bold text-neutral-600">任务规划</span>
+            <span className="shrink-0 font-mono text-[10px] text-neutral-400">
+              {planDone}/{planSteps.length}{planFailed > 0 ? ` · ${planFailed} 失败` : ''}
+            </span>
+            <span className="h-1 w-12 shrink-0 overflow-hidden rounded-full bg-neutral-100">
+              <span
+                className={`block h-full rounded-full transition-all duration-500 ${planFailed > 0 && planDone === planSteps.length ? 'bg-red-400' : 'bg-emerald-400'}`}
+                style={{ width: `${planPct}%` }}
+              />
+            </span>
+            {planRunning && <Loader2 size={10} className="shrink-0 animate-spin text-blue-500" />}
+            <ChevronRight size={11} className="shrink-0 text-neutral-300" />
+          </button>
+        )}
+      </div>
 
-      {isOpen && (
-        <div className="mt-2 relative pl-6">
-          <div className="absolute left-[11px] top-2 bottom-2 w-px bg-neutral-100" />
-          <div className="space-y-3 py-1">
-            {userEvents.map((ev, i) => <TimelineEvent key={i} ev={ev} />)}
-            {streaming && (
-              <div className="relative">
-                <div className="absolute -left-6 top-0 w-6 h-5 bg-white flex items-center justify-center">
-                  <Loader2 size={13} className="text-neutral-400 animate-spin" />
-                </div>
-                <p className="text-[12px] text-neutral-400 leading-snug">思考中...</p>
+      {open && (
+        <div className="mt-1.5">
+          {userEvents.length > 0 && (
+            <div className="relative pl-6">
+              <div className="absolute bottom-1 left-[11px] top-1 w-px bg-neutral-100" />
+              <div className="space-y-3 py-0.5">
+                {userEvents.map((ev, i) => <TimelineEvent key={i} ev={ev} />)}
+                {streaming && (
+                  <div className="relative">
+                    <div className="absolute -left-6 top-0 flex h-5 w-6 items-center justify-center bg-white">
+                      <Loader2 size={13} className="animate-spin text-neutral-400" />
+                    </div>
+                    <p className="text-[12px] leading-snug text-neutral-400">思考中...</p>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </div>
+          )}
+          {streaming && userEvents.length === 0 && (
+            <div className="flex items-center gap-2 py-0.5">
+              <Loader2 size={12} className="animate-spin text-neutral-400" />
+              <p className="text-[12px] text-neutral-400">管家正在处理...</p>
+            </div>
+          )}
 
           {debugEvents.length > 0 && (
-            <div className="relative mt-1">
-              <div className="absolute -left-6 top-0 w-6 h-5 bg-white flex items-center justify-center">
-                <Cpu size={12} className="text-neutral-300" />
-              </div>
+            <div className={userEvents.length > 0 ? 'mt-2 pl-6' : 'mt-2'}>
               <button
-                onClick={() => setDebugOpen(!debugOpen)}
-                className="flex items-center gap-1.5 text-[11px] font-mono text-neutral-400 hover:text-neutral-600 transition-colors"
+                onClick={() => setDebugOpen(v => !v)}
+                className="flex items-center gap-1.5 font-mono text-[11px] text-neutral-400 transition-colors hover:text-neutral-600"
               >
+                <Cpu size={11} />
                 调试信息（{debugEvents.length}）
-                {debugOpen ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                {debugOpen ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
               </button>
               {debugOpen && (
-                <div className="mt-2 ml-1 space-y-1.5 border-l border-dashed border-neutral-200 pl-3">
+                <div className="mt-1.5 space-y-1.5 border-l border-dashed border-neutral-200 pl-3">
                   {debugEvents.map((ev, i) => (
                     <div key={i}>
-                      <p className="text-[11px] font-mono text-neutral-400 leading-snug">{ev.label}</p>
+                      <p className="font-mono text-[11px] leading-snug text-neutral-400">{ev.label}</p>
                       {ev.detail && <ToolDetail detail={ev.detail} />}
                     </div>
                   ))}
@@ -259,80 +312,34 @@ const Timeline: React.FC<{ events: TimelineItem[]; streaming: boolean }> = ({ ev
               )}
             </div>
           )}
-        </div>
-      )}
-    </div>
-  );
-};
 
-const ReasoningSection: React.FC<{ blocks: ReasoningBlock[]; streaming: boolean }> = ({ blocks, streaming }) => {
-  const [open, setOpen] = useState(false);
+          {reasoningText && (
+            <div className="mt-3 border-l-2 border-neutral-100 pl-3.5">
+              <p className="mb-1 flex items-center gap-1 text-[11px] font-bold text-neutral-400">
+                <Brain size={11} /> 思考过程
+                <span className="font-mono text-[10px] font-normal">
+                  {reasoningText.length} 字{streaming ? ' · 生成中' : ''}
+                </span>
+              </p>
+              <div className="max-h-56 overflow-y-auto">
+                <pre className="whitespace-pre-wrap text-[12px] leading-relaxed text-neutral-500">{reasoningText}</pre>
+              </div>
+            </div>
+          )}
 
-  useEffect(() => {
-    if (streaming) setOpen(true);
-  }, [streaming]);
-
-  if (blocks.length === 0) return null;
-  const text = blocks.map(b => (b.label ? `【${b.label}】\n` : '') + b.text).join('\n\n');
-  const last = blocks[blocks.length - 1];
-
-  return (
-    <div className="w-full mb-3 rounded-2xl border border-neutral-200/70 bg-neutral-50/60 overflow-hidden">
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-neutral-100/60 transition-colors"
-      >
-        <Brain size={14} className="text-violet-500 flex-shrink-0" />
-        <span className="text-[12px] font-bold text-neutral-600 flex-1">
-          {last.label || '思考过程'}
-          <span className="ml-2 font-mono text-[10px] text-neutral-400">
-            {text.length} 字{streaming ? ' · 生成中' : ''}
-          </span>
-        </span>
-        {streaming
-          ? <Loader2 size={12} className="text-neutral-400 animate-spin" />
-          : open ? <ChevronDown size={13} className="text-neutral-400" /> : <ChevronRight size={13} className="text-neutral-400" />}
-      </button>
-      {open && (
-        <div className="px-4 pb-3 max-h-64 overflow-y-auto">
-          <pre className="text-[12px] leading-relaxed text-neutral-500 whitespace-pre-wrap">{text}</pre>
-        </div>
-      )}
-    </div>
-  );
-};
-
-/** 过程叙述（commentary 相位正文块）：流式期展开、终态默认折叠——与正式答复视觉分层。 */
-const ProcessNarrative: React.FC<{ blocks: TextBlock[]; streaming: boolean }> = ({ blocks, streaming }) => {
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    if (streaming) setOpen(true);
-  }, [streaming]);
-
-  if (blocks.length === 0) return null;
-  const text = blocks.map(b => b.text).join('\n');
-
-  return (
-    <div className="w-full mb-3 rounded-2xl border border-neutral-200/60 bg-white overflow-hidden">
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-neutral-50 transition-colors"
-      >
-        <FileText size={13} className="text-neutral-400 flex-shrink-0" />
-        <span className="text-[12px] font-bold text-neutral-500 flex-1">
-          过程叙述
-          <span className="ml-2 font-mono text-[10px] font-normal text-neutral-400">
-            {text.length} 字{streaming ? ' · 生成中' : ''}
-          </span>
-        </span>
-        {streaming
-          ? <Loader2 size={12} className="text-neutral-400 animate-spin" />
-          : open ? <ChevronDown size={13} className="text-neutral-400" /> : <ChevronRight size={13} className="text-neutral-400" />}
-      </button>
-      {open && (
-        <div className="px-4 pb-3 max-h-72 overflow-y-auto border-t border-neutral-100">
-          <MdContent text={text} />
+          {narrativeText && (
+            <div className="mt-3 border-l-2 border-neutral-100 pl-3.5">
+              <p className="mb-1 flex items-center gap-1 text-[11px] font-bold text-neutral-400">
+                <FileText size={11} /> 过程叙述
+                <span className="font-mono text-[10px] font-normal">
+                  {narrativeText.length} 字{streaming ? ' · 生成中' : ''}
+                </span>
+              </p>
+              <div className="max-h-72 overflow-y-auto">
+                <MdContent text={narrativeText} />
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -377,8 +384,9 @@ const splitPhases = (blocks: TextBlock[] | undefined, content: string): { narrat
     return { narrative: [], answer: content };
   }
   const narrative = blocks.filter(b => b.phase === 'commentary');
+  // 有分块时严禁回退 content：流式期/失败路径全部仍是 commentary，回退会把过程叙述再渲染成答复
   const answer = blocks.filter(b => b.phase === 'final').map(b => b.text).join('\n');
-  return { narrative, answer: answer || content };
+  return { narrative, answer };
 };
 
 const buildDownloadUrl = (partUrl: string): string => {
@@ -692,34 +700,6 @@ const WaitingCard: React.FC<{
   );
 };
 
-/** 任务规划入口按钮：聊天内嵌的紧凑进度条，点击打开右侧规划抽屉 */
-const PlanLauncher: React.FC<{ steps: PlanStep[]; onOpen: () => void }> = ({ steps, onOpen }) => {
-  const done = steps.filter(s => ['SUCCEEDED', 'FAILED', 'SKIPPED', 'CANCELED'].includes(s.status ?? '')).length;
-  const failed = steps.filter(s => s.status === 'FAILED').length;
-  const running = steps.some(s => s.status === 'RUNNING');
-  const pct = steps.length ? Math.round((done / steps.length) * 100) : 0;
-  return (
-    <button
-      onClick={onOpen}
-      className="mb-2 flex items-center gap-2.5 px-3.5 py-2 rounded-xl border border-neutral-200 bg-white hover:border-violet-300 hover:shadow-sm transition-all text-left"
-    >
-      <GitBranch size={13} className="text-neutral-400 shrink-0" />
-      <span className="text-xs font-bold text-neutral-700 shrink-0">任务规划</span>
-      <span className="text-[10px] font-mono text-neutral-400 shrink-0">
-        {done}/{steps.length}{failed > 0 ? ` · ${failed} 失败` : ''}
-      </span>
-      <span className="w-16 h-1 rounded-full bg-neutral-100 overflow-hidden shrink-0">
-        <span
-          className={`block h-full rounded-full transition-all duration-500 ${failed > 0 && done === steps.length ? 'bg-red-400' : 'bg-emerald-400'}`}
-          style={{ width: `${pct}%` }}
-        />
-      </span>
-      {running && <Loader2 size={11} className="animate-spin text-blue-500 shrink-0" />}
-      <ChevronRight size={12} className="text-neutral-300 shrink-0" />
-    </button>
-  );
-};
-
 /** 任务规划右侧抽屉（Trae / Claude Desktop 式）：完整 DAG 图与步骤列表，支持放大到居中大屏 */
 const PlanDrawer: React.FC<{ steps: PlanStep[]; onClose: () => void }> = ({ steps, onClose }) => {
   const [zoomed, setZoomed] = useState(false);
@@ -837,16 +817,16 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
   };
 
   return (
-    <div className="w-[248px] h-full flex flex-col flex-shrink-0 bg-[#F7F7F9] border-r border-neutral-100 pt-3 pb-3 px-2">
+    <div className="hidden w-60 min-w-[200px] shrink flex-col rounded-2xl border border-neutral-200/60 bg-white/55 p-2 backdrop-blur-md lg:flex">
       <button
         onClick={onNewChat}
-        className="flex items-center justify-center gap-2 bg-black text-white rounded-2xl py-2.5 mx-1.5 mb-4 shadow-sm hover:bg-neutral-800 transition-all active:scale-95"
+        className="mb-3 flex items-center justify-center gap-2 rounded-2xl bg-black py-2.5 text-white shadow-sm transition-all hover:bg-neutral-800 active:scale-95"
       >
         <MessageSquarePlus size={16} />
         <span className="text-xs font-black">开启新会话</span>
       </button>
 
-      <div className={`flex-1 overflow-y-auto ${THEME.scrollbar} px-1.5 space-y-4`}>
+      <div className={`min-h-0 flex-1 space-y-4 overflow-y-auto px-1 ${THEME.scrollbar}`}>
         {loading ? (
           <div className="text-center py-10 text-[11px] text-neutral-400 font-bold animate-pulse">加载会话...</div>
         ) : (
@@ -1722,7 +1702,7 @@ const InvokePage: React.FC = () => {
 
   // ─── 渲染 ──────────────────────────────────────────────────
   return (
-    <div className="h-full flex bg-white rounded-2xl overflow-hidden shadow-sm border border-neutral-100">
+    <div className="flex h-full min-h-0 min-w-0 gap-2.5 overflow-hidden p-2.5">
       <SessionSidebar
         sessions={sessions}
         currentSessionId={sessionId}
@@ -1733,10 +1713,11 @@ const InvokePage: React.FC = () => {
         onDelete={deleteSession}
       />
 
-      {/* 右侧主列 */}
-      <div className="flex-1 min-w-0 flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-100 flex-shrink-0 gap-3">
+      {/* 主聊天工作区：页面的视觉中心（半透明白面板，标题栏 / 消息区 / 输入区三段）。
+          min 宽度取 min(520px,100%)：常规屏保住 520px 下限，窄屏让位于容器、不产生横向滚动 */
+      <div className="flex min-w-[min(520px,100%)] flex-1 flex-col overflow-hidden rounded-2xl border border-neutral-200/70 bg-white/80 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.15)] backdrop-blur-xl">
+        {/* 会话标题栏 */}
+        <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-neutral-100/80 px-6 py-3.5">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-sm flex-shrink-0">
               <Cpu size={17} className="text-white" />
@@ -1788,8 +1769,8 @@ const InvokePage: React.FC = () => {
           </div>
         </div>
 
-        {/* Messages */}
-        <div className={`flex-1 overflow-y-auto px-6 py-5 space-y-5 ${THEME.scrollbar}`}>
+        {/* 消息内容区：独立滚动，标题栏与输入区固定 */}
+        <div className={`min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-6 py-5 ${THEME.scrollbar}`}>
           {loadingHistory && (
             <div className="flex items-center justify-center gap-2 text-neutral-400 text-sm py-8">
               <Loader2 size={14} className="animate-spin" /> 加载历史消息...
@@ -1807,17 +1788,14 @@ const InvokePage: React.FC = () => {
           {messages.map(msg => {
             if (msg.role === 'user') {
               return (
-                <div key={msg.id} className="flex gap-4 flex-row-reverse">
-                  <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center shadow-sm bg-neutral-900">
-                    <User size={14} className="text-white" />
-                  </div>
-                  <div className="max-w-[75%] px-5 py-3.5 rounded-xl rounded-tr-sm bg-neutral-900 text-white text-[14px] leading-relaxed whitespace-pre-wrap shadow-sm">
+                <div key={msg.id} className="flex justify-end">
+                  <div className="max-w-[75%] rounded-[18px] rounded-tr-md bg-neutral-900 px-5 py-3 text-[14px] leading-relaxed whitespace-pre-wrap text-white shadow-sm">
                     {msg.images && msg.images.length > 0 && (
-                      <div className="flex gap-2 flex-wrap mb-2">
+                      <div className="mb-2 flex flex-wrap gap-2">
                         {msg.images.map((src, i) => (
                           <a key={i} href={src} target="_blank" rel="noreferrer" className="block">
                             <img src={src} alt={`图片 ${i + 1}`}
-                              className="max-w-40 max-h-40 rounded-lg border border-white/20 object-cover" />
+                              className="max-h-40 max-w-40 rounded-lg border border-white/20 object-cover" />
                           </a>
                         ))}
                       </div>
@@ -1828,142 +1806,117 @@ const InvokePage: React.FC = () => {
               );
             }
 
-            // 历史消息（服务端会话记录）
+            // 历史消息（服务端会话记录）：过程快照合并进统一折叠区，回放不再碎片化
             if (msg.source === 'history') {
               return (
-                <div key={msg.id} className="flex gap-4">
-                  <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center shadow-sm bg-white border border-neutral-200">
-                    <Bot size={15} className="text-violet-600" />
-                  </div>
-                  <div className="flex-1 min-w-0 max-w-[90%] mt-0.5">
-                    {msg.reasoning && (
-                      <details className="mb-2 rounded-xl border border-neutral-200/70 bg-neutral-50/60">
-                        <summary className="px-4 py-2 text-[12px] font-bold text-neutral-500 cursor-pointer select-none">
-                          <Brain size={12} className="inline mr-1.5 -mt-0.5 text-violet-400" />思考过程
-                        </summary>
-                        <pre className="px-4 pb-3 max-h-56 overflow-y-auto text-[12px] leading-relaxed text-neutral-500 whitespace-pre-wrap">{msg.reasoning}</pre>
-                      </details>
-                    )}
-                    {/* 过程快照回放：执行步骤 / 思考块 / 过程叙述（刷新后重建执行过程视图） */}
-                    {msg.blocks?.events && msg.blocks.events.length > 0 && (
-                      <Timeline events={msg.blocks.events} streaming={false} />
-                    )}
-                    {msg.blocks?.reasonings && msg.blocks.reasonings.length > 0 && (
-                      <ReasoningSection blocks={msg.blocks.reasonings} streaming={false} />
-                    )}
-                    <ProcessNarrative
-                      blocks={(msg.blocks?.textBlocks ?? []).filter(b => b.phase !== 'final')}
-                      streaming={false}
-                    />
-                    {msg.plan && msg.plan.length > 0 && (
-                      <PlanLauncher steps={msg.plan} onOpen={() => setPlanDrawerFor(msg.id)} />
-                    )}
-                    <MdContent text={msg.content} />
-                    {(() => {
-                      const arts = msg.blocks?.artifacts && msg.blocks.artifacts.length > 0
-                        ? msg.blocks.artifacts : msg.artifacts;
-                      return arts && arts.length > 0 && (
-                        <div className="mt-2 space-y-2">
-                          {arts.map((a, i) => (
-                            <ArtifactCard key={a.artifactId} artifact={a}
-                              onPreview={() => setPreview({ artifacts: arts, index: i })} />
-                          ))}
-                        </div>
-                      );
-                    })()}
-                    {(() => {
-                      const parts = [msg.model, msg.tokens && msg.tokens > 0 ? `${msg.tokens} tokens` : null].filter(Boolean);
-                      return parts.length > 0 && (
-                        <p className="mt-1.5 text-[10px] text-neutral-300 font-mono">{parts.join(' · ')}</p>
-                      );
-                    })()}
-                  </div>
+                <div key={msg.id} className="min-w-0">
+                  <ProcessSection
+                    events={msg.blocks?.events ?? []}
+                    reasonings={[
+                      ...(msg.reasoning ? [{ id: 'h-reasoning', label: null, text: msg.reasoning }] : []),
+                      ...(msg.blocks?.reasonings ?? []),
+                    ]}
+                    narrative={(msg.blocks?.textBlocks ?? []).filter(b => b.phase !== 'final')}
+                    streaming={false}
+                    plan={msg.plan}
+                    onOpenPlan={msg.plan && msg.plan.length > 0 ? () => setPlanDrawerFor(msg.id) : undefined}
+                  />
+                  <MdContent text={msg.content} />
+                  {(() => {
+                    const arts = msg.blocks?.artifacts && msg.blocks.artifacts.length > 0
+                      ? msg.blocks.artifacts : msg.artifacts;
+                    return arts && arts.length > 0 && (
+                      <div className="mt-2 space-y-2">
+                        {arts.map((a, i) => (
+                          <ArtifactCard key={a.artifactId} artifact={a}
+                            onPreview={() => setPreview({ artifacts: arts, index: i })} />
+                        ))}
+                      </div>
+                    );
+                  })()}
+                  {(() => {
+                    const parts = [msg.model, msg.tokens && msg.tokens > 0 ? `${msg.tokens} tokens` : null].filter(Boolean);
+                    return parts.length > 0 && (
+                      <p className="mt-1.5 font-mono text-[10px] text-neutral-300">{parts.join(' · ')}</p>
+                    );
+                  })()}
                 </div>
               );
             }
 
-            // 活体消息（协议 v1 事件聚合）
+            // 活体消息（协议 v1 事件聚合）：过程折叠区 + 正式答复，终态自动收起过程
             const live = msg.live;
             const isStreaming = !live.terminal && !live.resuming;
+            // 相位分流渲染：过程叙述与正式答复分层，不再把执行步骤误读为正文
+            const { narrative, answer } = splitPhases(live.textBlocks, live.content);
             return (
-              <div key={msg.id} className="flex gap-4">
-                <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center shadow-sm bg-white border border-neutral-200">
-                  <Bot size={15} className="text-violet-600" />
-                </div>
-                <div className="flex-1 min-w-0 max-w-[90%] mt-0.5">
-                  {live.plan && live.plan.length > 0 && (
-                    <PlanLauncher steps={live.plan} onOpen={() => setPlanDrawerFor(msg.id)} />
-                  )}
-                  <Timeline events={live.events} streaming={isStreaming} />
-                  <ReasoningSection blocks={live.reasonings} streaming={isStreaming} />
+              <div key={msg.id} className="min-w-0">
+                <ProcessSection
+                  events={live.events}
+                  reasonings={live.reasonings}
+                  narrative={narrative}
+                  streaming={isStreaming}
+                  plan={live.plan}
+                  onOpenPlan={live.plan && live.plan.length > 0 ? () => setPlanDrawerFor(msg.id) : undefined}
+                />
 
-                  {(() => {
-                    // 相位分流渲染：过程叙述与正式答复分层，不再把执行步骤误读为正文
-                    const { narrative, answer } = splitPhases(live.textBlocks, live.content);
-                    return (
-                      <>
-                        <ProcessNarrative blocks={narrative} streaming={isStreaming} />
-                        {(answer || live.errorMsg || (isStreaming && !answer)) && (
-                          <div className={`w-full ${live.terminal === 'failed' ? 'px-5 py-4 rounded-2xl bg-red-50 border border-red-100' : ''}`}>
-                            {live.terminal === 'failed'
-                              ? <p className="text-[14px] text-red-600">{live.errorMsg || answer || '调用失败'}</p>
-                              : <MdContent text={answer} />}
-                            {isStreaming && !answer && (
-                              <span className="flex gap-1.5 items-center mt-2 h-4">
-                                {[0, 0.15, 0.3].map((d, i) => (
-                                  <span key={i} className="w-1.5 h-1.5 rounded-full bg-neutral-300 animate-pulse" style={{ animationDelay: `${d}s` }} />
-                                ))}
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      </>
-                    );
-                  })()}
+                {(answer || live.errorMsg || (isStreaming && !answer)) && (
+                  <div className={`w-full ${live.terminal === 'failed' ? 'px-5 py-4 rounded-2xl bg-red-50 border border-red-100' : ''}`}>
+                    {live.terminal === 'failed'
+                      ? <p className="text-[14px] text-red-600">{live.errorMsg || answer || '调用失败'}</p>
+                      : <MdContent text={answer} />}
+                    {isStreaming && !answer && (
+                      <span className="flex gap-1.5 items-center mt-2 h-4">
+                        {[0, 0.15, 0.3].map((d, i) => (
+                          <span key={i} className="w-1.5 h-1.5 rounded-full bg-neutral-300 animate-pulse" style={{ animationDelay: `${d}s` }} />
+                        ))}
+                      </span>
+                    )}
+                  </div>
+                )}
 
-                  {live.artifacts.length > 0 && (
-                    <div className="mt-2 space-y-2">
-                      {live.artifacts.map((a, i) => (
-                        <ArtifactCard key={a.artifactId} artifact={a}
-                          onPreview={() => setPreview({ artifacts: live.artifacts, index: i })} />
-                      ))}
-                    </div>
-                  )}
+                {live.artifacts.length > 0 && (
+                  <div className="mt-2 space-y-2">
+                    {live.artifacts.map((a, i) => (
+                      <ArtifactCard key={a.artifactId} artifact={a}
+                        onPreview={() => setPreview({ artifacts: live.artifacts, index: i })} />
+                    ))}
+                  </div>
+                )}
 
-                  {live.terminal === 'cancelled' && (
-                    <div className="mt-2 flex items-center gap-1.5 text-[12px] font-semibold text-neutral-400">
-                      <XCircle size={13} /> 本次运行已取消
-                    </div>
-                  )}
+                {live.terminal === 'cancelled' && (
+                  <div className="mt-2 flex items-center gap-1.5 text-[12px] font-semibold text-neutral-400">
+                    <XCircle size={13} /> 本次运行已取消
+                  </div>
+                )}
 
-                  {live.clarification && live.terminal !== 'failed' && (
-                    <ClarificationCard
-                      question={live.clarification.question}
-                      suggestions={live.clarification.suggestions}
-                      onPick={s => setInput(s)}
-                    />
-                  )}
+                {live.clarification && live.terminal !== 'failed' && (
+                  <ClarificationCard
+                    question={live.clarification.question}
+                    suggestions={live.clarification.suggestions}
+                    onPick={s => setInput(s)}
+                  />
+                )}
 
-                  {live.stop === 'INPUT_REQUIRED' && live.approval && (
-                    <WaitingCard
-                      live={live}
-                      onConfirm={() => void decideWaiting(msg.id, 'confirm')}
-                      onCancel={() => void decideWaiting(msg.id, 'cancel')}
-                    />
-                  )}
+                {live.stop === 'INPUT_REQUIRED' && live.approval && (
+                  <WaitingCard
+                    live={live}
+                    onConfirm={() => void decideWaiting(msg.id, 'confirm')}
+                    onCancel={() => void decideWaiting(msg.id, 'cancel')}
+                  />
+                )}
 
-                  {live.terminal === 'final' && live.stop !== 'INPUT_REQUIRED' && live.meta && (() => {
-                    const m = live.meta;
-                    const parts = [
-                      m.model,
-                      m.totalTokens ? `${m.totalTokens} tokens` : null,
-                      m.durationMs ? `${(m.durationMs / 1000).toFixed(1)}s` : null,
-                    ].filter(Boolean);
-                    return parts.length > 0 && (
-                      <p className="mt-1.5 text-[10px] text-neutral-300 font-mono">{parts.join(' · ')}</p>
-                    );
-                  })()}
-                </div>
+                {live.terminal === 'final' && live.stop !== 'INPUT_REQUIRED' && live.meta && (() => {
+                  const m = live.meta;
+                  const parts = [
+                    m.model,
+                    m.totalTokens ? `${m.totalTokens} tokens` : null,
+                    m.durationMs ? `${(m.durationMs / 1000).toFixed(1)}s` : null,
+                  ].filter(Boolean);
+                  return parts.length > 0 && (
+                    <p className="mt-1.5 font-mono text-[10px] text-neutral-300">{parts.join(' · ')}</p>
+                  );
+                })()}
               </div>
             );
           })}

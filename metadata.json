@@ -1,0 +1,5 @@
+{
+  "name": "Orrery Web",
+  "description": "Orrery 智能平台前端：智能管家编排、知识库（文档/检索/对话/本体/Wiki/图谱）与系统管理的统一控制台。",
+  "requestFramePermissions": []
+}

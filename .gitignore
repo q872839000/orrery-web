@@ -29,3 +29,12 @@ dist-ssr
 .omc/
 .omx/
 *.iml
+
+# 本地调试/草稿产物（不入库）
+.tsbuildinfo
+tsconfig.tsbuildinfo
+/.tmp-*
+/_*.png
+/_*.py
+/*.ps1
+/orrery-ontology-graph-redesign/

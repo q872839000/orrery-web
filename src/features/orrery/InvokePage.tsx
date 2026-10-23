@@ -12,11 +12,11 @@ import {
 import { GATEWAY_BASE } from '../../shared/services/request';
 import config from '../../shared/config';
 import {
-  Send, Bot, User, Loader2, ChevronDown, ChevronRight, ChevronUp, Cpu, Trash2,
-  Brain, Wrench, CheckCircle2, Sparkles, AlertCircle, Clock, Check, XCircle,
-  Download, FileText, ExternalLink, MessageSquarePlus, MessageSquare, MoreHorizontal,
+  Send, Bot, Loader2, ChevronDown, ChevronRight, ChevronUp, Cpu, Trash2,
+  Brain, Wrench, Sparkles, AlertCircle, Clock, Check, XCircle,
+  Download, FileText, ExternalLink, MessageSquare, MoreHorizontal,
   Edit3, ListChecks, Square, Lightbulb, Zap, GitBranch, X, Maximize2, Minimize2,
-  ImagePlus,
+  ImagePlus, Plus, Search,
 } from 'lucide-react';
 import { THEME } from '../../shared/styles/theme';
 import Select from '../../shared/components/ui/Select';
@@ -454,7 +454,7 @@ const ArtifactCard: React.FC<{ artifact: TaskArtifact; onPreview: () => void }> 
 };
 
 const MdContent: React.FC<{ text: string }> = ({ text }) => (
-  <div className="text-[14px] leading-[1.7] text-neutral-800">
+  <div className="font-prose text-[14px] leading-[1.7] text-neutral-800">
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       components={{
@@ -780,8 +780,21 @@ const getSessionGroup = (ts?: number) => {
   const days = diff / (1000 * 3600 * 24);
   if (days < 1 && now.getDate() === date.getDate()) return '今天';
   if (days < 2) return '昨天';
-  if (days < 7) return '过去7天';
+  if (days < 7) return '7 天内';
+  if (days < 30) return '30 天内';
   return '更早';
+};
+
+/** 会话条目的右侧时间标：今天显时刻，昨天显「昨天」，更早显月-日（对齐设计稿） */
+const fmtSessionTime = (ts?: number) => {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const now = new Date();
+  const days = (now.getTime() - d.getTime()) / (1000 * 3600 * 24);
+  if (days < 1 && now.getDate() === d.getDate())
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  if (days < 2) return '昨天';
+  return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
 interface SessionSidebarProps {
@@ -800,16 +813,19 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
 
   const groups = useMemo(() => {
-    const g: Record<string, ButlerSession[]> = { '今天': [], '昨天': [], '过去7天': [], '更早': [] };
+    const g: Record<string, ButlerSession[]> = { '今天': [], '昨天': [], '7 天内': [], '30 天内': [], '更早': [] };
+    const kw = search.trim().toLowerCase();
     const sorted = [...sessions].sort((a, b) => (b.updateTime ?? b.createTime ?? 0) - (a.updateTime ?? a.createTime ?? 0));
     sorted.forEach(s => {
+      if (kw && !(s.title || '未命名会话').toLowerCase().includes(kw)) return;
       const key = getSessionGroup(s.updateTime ?? s.createTime);
       (g[key] ?? g['更早']).push(s);
     });
     return g;
-  }, [sessions]);
+  }, [sessions, search]);
 
   const submitEdit = () => {
     if (editingId && editTitle.trim().length >= 2) onRename(editingId, editTitle.trim());
@@ -817,23 +833,38 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
   };
 
   return (
-    <div className="hidden w-60 min-w-[200px] shrink flex-col rounded-2xl border border-neutral-200/60 bg-white/55 p-2 backdrop-blur-md lg:flex">
-      <button
-        onClick={onNewChat}
-        className="mb-3 flex items-center justify-center gap-2 rounded-2xl bg-black py-2.5 text-white shadow-sm transition-all hover:bg-neutral-800 active:scale-95"
-      >
-        <MessageSquarePlus size={16} />
-        <span className="text-xs font-black">开启新会话</span>
-      </button>
+    <div className="hidden w-64 min-w-[220px] shrink flex-col rounded-2xl border border-neutral-200/60 bg-white/60 p-3 backdrop-blur-md lg:flex">
+      {/* 标题行 + 新建入口（小尺寸黑色胶囊，对齐设计稿） */}
+      <div className="flex items-center justify-between px-1 pb-3">
+        <h3 className="text-[13px] font-black text-neutral-800">对话历史</h3>
+        <button
+          onClick={onNewChat}
+          className="flex items-center gap-1 rounded-lg bg-black px-2.5 py-1.5 text-[11px] font-bold text-white shadow-sm transition-all hover:bg-neutral-800 active:scale-95"
+        >
+          <Plus size={12} />
+          新建会话
+        </button>
+      </div>
 
-      <div className={`min-h-0 flex-1 space-y-4 overflow-y-auto px-1 ${THEME.scrollbar}`}>
+      {/* 搜索框 */}
+      <div className="relative mb-3">
+        <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400" />
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="搜索对话记录..."
+          className="w-full rounded-xl border border-neutral-200/70 bg-white/80 py-1.5 pl-8 pr-2 text-[12px] outline-none transition-colors placeholder:text-neutral-300 focus:border-neutral-300"
+        />
+      </div>
+
+      <div className={`min-h-0 flex-1 space-y-4 overflow-y-auto px-0.5 ${THEME.scrollbar}`}>
         {loading ? (
           <div className="text-center py-10 text-[11px] text-neutral-400 font-bold animate-pulse">加载会话...</div>
         ) : (
           <>
             {Object.entries(groups).map(([groupName, list]) => list.length > 0 && (
-              <div key={groupName} className="space-y-1">
-                <div className="px-3 text-[10px] font-black text-neutral-400 uppercase tracking-widest mb-1.5">{groupName}</div>
+              <div key={groupName} className="space-y-0.5">
+                <div className="px-2 text-[10px] font-black text-neutral-400 uppercase tracking-widest mb-1.5">{groupName}</div>
                 {list.map(s => {
                   const isActive = currentSessionId === s.id;
                   const isEditing = editingId === s.id;
@@ -841,11 +872,11 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
                     <div
                       key={s.id}
                       onClick={() => !isEditing && onSelect(s.id)}
-                      className={`group relative flex items-center px-3 py-2.5 rounded-2xl cursor-pointer transition-all ${
-                        isActive ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:bg-white/70 hover:text-black'
+                      className={`group relative flex items-start gap-2 rounded-xl px-2.5 py-2 cursor-pointer transition-all ${
+                        isActive ? 'bg-white border border-neutral-200/70 shadow-sm' : 'border border-transparent hover:bg-white/70'
                       }`}
                     >
-                      <MessageSquare size={15} className={`flex-shrink-0 mr-2.5 ${isActive ? 'text-black' : 'text-neutral-400'}`} />
+                      <MessageSquare size={14} className={`mt-0.5 flex-shrink-0 ${isActive ? 'text-black' : 'text-neutral-400'}`} />
                       {isEditing ? (
                         <input
                           autoFocus
@@ -860,15 +891,20 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
                           className="flex-1 bg-transparent border-b border-black outline-none text-xs font-bold min-w-0"
                         />
                       ) : (
-                        <div className="flex-1 min-w-0 pr-5">
-                          <p className="text-xs font-bold truncate">{s.title || '未命名会话'}</p>
-                          {s.messageCount != null && s.messageCount > 0 && (
-                            <p className="text-[10px] text-neutral-400 font-mono mt-0.5">{s.messageCount} 条消息</p>
-                          )}
+                        <div className="flex-1 min-w-0 pr-4">
+                          <p className="text-xs font-bold truncate text-neutral-800">{s.title || '未命名会话'}</p>
+                          <p className="text-[10px] text-neutral-400 truncate mt-0.5">
+                            {s.messageCount != null && s.messageCount > 0 ? `${s.messageCount} 条消息` : '空会话'}
+                          </p>
                         </div>
                       )}
                       {!isEditing && (
-                        <div className={`absolute right-2 opacity-0 group-hover:opacity-100 ${menuOpenId === s.id ? 'opacity-100' : ''} transition-opacity`}>
+                        <span className="flex-shrink-0 text-[10px] font-mono text-neutral-300 mt-0.5">
+                          {fmtSessionTime(s.updateTime ?? s.createTime)}
+                        </span>
+                      )}
+                      {!isEditing && (
+                        <div className={`absolute right-1.5 bottom-1.5 opacity-0 group-hover:opacity-100 ${menuOpenId === s.id ? 'opacity-100' : ''} transition-opacity`}>
                           <button
                             onClick={e => {
                               e.stopPropagation();
@@ -879,7 +915,7 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
                             <MoreHorizontal size={13} />
                           </button>
                           {menuOpenId === s.id && (
-                            <div className={`absolute right-0 top-full mt-1 z-50 flex w-24 flex-col overflow-hidden py-1 ${THEME.dropdown}`}>
+                            <div className={`absolute right-0 bottom-full mb-1 z-50 flex w-24 flex-col overflow-hidden py-1 ${THEME.dropdown}`}>
                               <button
                                 onClick={e => {
                                   e.stopPropagation();
@@ -916,6 +952,9 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
                 <MessageSquare size={36} className="mx-auto mb-2 text-neutral-400" />
                 <p className="text-xs font-black text-neutral-400">暂无历史会话</p>
               </div>
+            )}
+            {sessions.length > 0 && Object.values(groups).every(l => l.length === 0) && (
+              <p className="text-center py-10 text-[11px] text-neutral-400">没有匹配「{search}」的会话</p>
             )}
           </>
         )}
@@ -1410,10 +1449,13 @@ const InvokePage: React.FC = () => {
     const stepStartedAt = new Map<number, number>();
     const stepToolCalls = new Map<number, number>();
     let currentStep = -1;
+    /** 本轮调用流的任务 ID（首帧 butler.task.created 送达后赋值；断线降级订阅流的凭据） */
+    let streamTaskId: string | undefined;
 
     try {
       await invokeButlerStream(text, sessionId, selectedAgent || null, {
         onTaskCreated: ext => {
+          streamTaskId = ext.taskId;
           updateLive(asstId, live => ({ ...live, taskId: ext.taskId }));
         },
         onStage: d => {
@@ -1614,12 +1656,24 @@ const InvokePage: React.FC = () => {
           updateLive(asstId, live => ({ ...live, terminal: 'cancelled' }));
         },
         onClose: () => {
-          // 主动停止（abort 信号）与被动断线分流：前者渲染已取消，后者才是连接中断
-          const aborted = signal.aborted;
-          updateLive(asstId, live => live.terminal ? live : aborted
-            ? { ...live, terminal: 'cancelled' }
-            : { ...live, terminal: 'failed', errorMsg: '连接中断' });
-          void refreshSessions();
+          // 主动停止（abort 信号）与被动断线分流：前者渲染已取消；
+          // 被动断线时任务在后台继续（服务端断连不取消任务）——已拿到 taskId 就
+          // 转任务订阅流继续收事件（终态已镜像到订阅流），订阅失败再由看门狗回退轮询；
+          // 连 taskId 都没拿到（建流即断）才按连接中断判失败
+          if (signal.aborted) {
+            updateLive(asstId, live => live.terminal ? live : { ...live, terminal: 'cancelled' });
+            void refreshSessions();
+            return;
+          }
+          if (streamTaskId) {
+            const tid = streamTaskId;
+            updateLive(asstId, live => live.terminal ? live : { ...live, resuming: true });
+            subscribeTaskStream(asstId, tid, sessionIdRef.current);
+          } else {
+            updateLive(asstId, live => live.terminal ? live
+              : { ...live, terminal: 'failed', errorMsg: '连接中断' });
+            void refreshSessions();
+          }
         },
       }, signal, approvalMode, images, resolvedProvider, resolvedModel, resolvedThinking);
     } catch (e: any) {
@@ -1650,7 +1704,8 @@ const InvokePage: React.FC = () => {
   };
 
   const selectSession = async (id: string) => {
-    if (streaming) return;
+    // 流式中允许切换会话：主调用流在后台继续运行（服务端断连不取消任务），
+    // 切回时经 resumeLiveIfRunning 重挂；此处只收当前会话的任务订阅流（切回按需重建）
     taskStreamRef.current.forEach(c => c.abort());
     taskStreamRef.current.clear();
     setSessionId(id);
@@ -1714,13 +1769,13 @@ const InvokePage: React.FC = () => {
       />
 
       {/* 主聊天工作区：页面的视觉中心（半透明白面板，标题栏 / 消息区 / 输入区三段）。
-          min 宽度取 min(520px,100%)：常规屏保住 520px 下限，窄屏让位于容器、不产生横向滚动 */
+          min 宽度取 min(520px,100%)：常规屏保住 520px 下限，窄屏让位于容器、不产生横向滚动 */}
       <div className="flex min-w-[min(520px,100%)] flex-1 flex-col overflow-hidden rounded-2xl border border-neutral-200/70 bg-white/80 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.15)] backdrop-blur-xl">
         {/* 会话标题栏 */}
         <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-neutral-100/80 px-6 py-3.5">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-sm flex-shrink-0">
-              <Cpu size={17} className="text-white" />
+            <div className="w-9 h-9 rounded-xl bg-neutral-900 flex items-center justify-center shadow-sm flex-shrink-0">
+              <Bot size={17} className="text-white" />
             </div>
             <div className="min-w-0">
               <h2 className="text-sm font-black text-black truncate">{currentTitle}</h2>
@@ -1950,28 +2005,19 @@ const InvokePage: React.FC = () => {
               ))}
             </div>
           )}
-          <div className="flex gap-3 items-end">
-            {/* 图片附件入口（视觉能力门控：当前模型不支持时禁用） */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={e => {
-                const files = Array.from(e.target.files ?? []);
-                e.target.value = '';
-                void addImages(files);
-              }}
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={!visionSupported || streaming || busyMsgId !== null}
-              title={visionSupported ? '添加图片（支持粘贴，最多 4 张）' : '当前模型不支持图片输入'}
-              className="flex-shrink-0 w-11 h-11 rounded-2xl border border-neutral-200 text-neutral-500 flex items-center justify-center hover:bg-neutral-50 hover:text-violet-600 hover:border-violet-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <ImagePlus size={16} />
-            </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={e => {
+              const files = Array.from(e.target.files ?? []);
+              e.target.value = '';
+              void addImages(files);
+            }}
+          />
+          <div className="rounded-2xl border border-neutral-200 bg-neutral-50/70 transition-all focus-within:border-violet-300 focus-within:bg-white focus-within:ring-2 focus-within:ring-violet-100">
             <textarea
               value={input}
               onChange={e => setInput(e.target.value)}
@@ -1979,16 +2025,28 @@ const InvokePage: React.FC = () => {
               onPaste={handlePaste}
               placeholder={busyMsgId ? '任务处理中，完成或取消后可继续输入…' : visionSupported ? '输入指令，可直接粘贴图片...' : '输入指令，Butler 将自动路由到合适的 Agent...'}
               disabled={streaming || busyMsgId !== null}
-              rows={1}
-              className="flex-1 bg-neutral-50 border border-neutral-200 rounded-2xl px-4 py-3 text-sm font-medium resize-none outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-300 transition-all max-h-32 min-h-[48px] disabled:opacity-50"
+              rows={2}
+              className="w-full resize-none border-none bg-transparent px-4 pt-3 text-sm font-medium outline-none focus:ring-0 max-h-32 min-h-[44px] disabled:opacity-50"
             />
-            <button
-              onClick={() => void send()}
-              disabled={(!input.trim() && pendingImages.length === 0) || streaming || busyMsgId !== null}
-              className="flex-shrink-0 w-11 h-11 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 text-white flex items-center justify-center shadow-sm hover:scale-105 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:scale-100"
-            >
-              {streaming ? <Loader2 size={16} className="animate-spin" /> : <Send size={15} />}
-            </button>
+            <div className="flex items-center justify-between px-3 pb-2.5">
+              {/* 图片附件入口（视觉能力门控：当前模型不支持时禁用） */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={!visionSupported || streaming || busyMsgId !== null}
+                title={visionSupported ? '添加图片（支持粘贴，最多 4 张）' : '当前模型不支持图片输入'}
+                className="w-8 h-8 rounded-xl text-neutral-400 flex items-center justify-center hover:bg-neutral-100 hover:text-neutral-700 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ImagePlus size={15} />
+              </button>
+              <button
+                onClick={() => void send()}
+                disabled={(!input.trim() && pendingImages.length === 0) || streaming || busyMsgId !== null}
+                title="发送"
+                className="w-9 h-9 rounded-full bg-neutral-900 text-white flex items-center justify-center shadow-sm hover:bg-neutral-700 active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                {streaming ? <Loader2 size={15} className="animate-spin" /> : <Send size={14} />}
+              </button>
+            </div>
           </div>
         </div>
       </div>
